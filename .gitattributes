@@ -1,0 +1,10 @@
+# 统一换行符与 diff 行为
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.docx binary
+*.doc binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
