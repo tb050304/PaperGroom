@@ -81,4 +81,6 @@ def main(path: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "论文.docx")
+    if len(sys.argv) < 2:
+        sys.exit("usage: python scripts/dump_body_xml.py <file.docx>")
+    main(sys.argv[1])

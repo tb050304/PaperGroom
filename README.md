@@ -1,42 +1,59 @@
 # PaperGroom
 
-> AI-powered Word document formatter: import a document + import formatting rules, export a spec-compliant docx.
+> Turn an unformatted Word document into one that meets a strict thesis/dissertation
+> formatting spec — with support for your own custom rules, which take precedence.
 
-## Introduction
+## The problem it solves
 
-PaperGroom tackles the tedious, repetitive task of adjusting paper / document formatting.
+Formatting a thesis by hand is slow, repetitive, and easy to get wrong: heading
+levels drift, line spacing is inconsistent, references don't follow the required
+style. PaperGroom automates that.
 
-Its workflow is:
+The documents it targets are the ones whose **structure has already been lost** —
+a paper drafted by an LLM and pasted into Word, or converted from PDF/HTML. In
+those files, a heading and its body text are often a single paragraph, several
+references get glued into one paragraph, and tables survive only as lines of
+plain text. Recovering that structure is the core of the tool, not an afterthought.
 
-```
-import docx → parse structure → AI labels each paragraph's role (title / body / figure caption / reference ...)
-           → apply styles via rule engine → export a spec-compliant docx
-```
+## Current status: **pre-rework**
 
-Core design principles:
+The pipeline runs end to end, but **the output quality is not acceptable yet**.
+The architecture is being reworked — see [ROADMAP.md](ROADMAP.md) for the plan
+and the reasoning.
 
-- **Formatting rules are decoupled from code**: rules live in YAML; adding a new template only requires a new config, not code changes
-- **AI only does semantic labeling, never applies formatting directly**: style application goes through a deterministic rule engine, avoiding LLM output instability
-- **Original objects are protected**: images, formulas, and field objects only get their styles changed, never their content, to prevent corruption
+The two root causes, both addressed by the rework:
 
-A standard ruleset referencing GB/T 7714 and common thesis specifications is bundled by default.
+1. **The pipeline assumes one paragraph equals one semantic unit.** For the target
+   documents that assumption is false, so no amount of labeling accuracy helps —
+   styling a paragraph that contains a heading *and* its body is wrong either way.
+2. **The AI is asked to emit concrete style values** (font sizes, spacing…) after
+   reading a long prose rules document. That is non-deterministic, expensive, and
+   impossible to unit-test — and it contradicts the design principle below.
 
-## Current Status
+Until the rework lands, treat this as a working prototype, not a tool to rely on.
 
-This project is at **Stage 0: project skeleton**. Core features are under development.
+## Design principles
 
-See [ROADMAP.md](ROADMAP.md) for the full development plan.
+These are the invariants the rework is converging on:
 
-## Quick Start (once development is ready)
+- **Structure before style.** Recover the logical structure first; styling a
+  wrong structure is wrong no matter how good the styling is.
+- **The AI only makes semantic judgments.** It decides *what a paragraph is*
+  (`title_l1`, `body`, `reference`, …) and nothing else. It never decides a font
+  size. Styles come from a deterministic ruleset.
+- **Rules are data, not code.** Formatting specs live in YAML; adding a template
+  means writing a config, not changing code.
+- **Your rules win.** A custom ruleset overrides the built-in one field by field
+  — anything you don't specify is inherited.
+- **Original objects are protected.** Images, equations, and field codes only
+  ever get their surrounding paragraph properties changed, never their content.
 
-> The repository currently contains only the project skeleton. The core pipeline of Stage 1 is not yet complete. The usage below is planned to help you understand the workflow in advance.
-
-### Requirements
+## Requirements
 
 - Python 3.10+
-- An LLM API (for AI structure recognition)
+- An LLM API key (Volcengine Ark, OpenAI, or any OpenAI-compatible endpoint)
 
-### Installation
+## Installation
 
 ```bash
 git clone https://github.com/tb050304/PaperGroom.git
@@ -44,98 +61,98 @@ cd PaperGroom
 pip install -e .
 ```
 
-### Configure Your API Key (Important)
+## Configure your API key
 
-This project requires an LLM API Key for document structure recognition. **The repository does not, and should not, contain any real secrets.**
-Follow these steps to replace it with your own:
-
-1. Copy the config template:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Edit `.env` and fill in your own keys:
-
-   ```env
-   # Pick one provider; comment out the ones you don't use
-   LLM_PROVIDER=ark  # options: ark | openai | local
-
-   # Volcengine Ark (recommended; stable access in China, plan quotas can reduce cost)
-   ARK_API_KEY=your_ark_api_key_here
-   ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-   ARK_MODEL=your_endpoint_id_or_model_name
-
-   # OpenAI (if used)
-   # OPENAI_API_KEY=your_openai_api_key_here
-   # OPENAI_BASE_URL=https://api.openai.com/v1
-   # OPENAI_MODEL=gpt-4o-mini
-   ```
-
-3. `.env` is already in `.gitignore` and will **never be committed to git**. Feel free to put real keys in it.
-
-### Usage
+The repository contains no secrets. `.env` is git-ignored — put your real key there.
 
 ```bash
-# Process a document with the default built-in rules
-papergroom process input.docx -o output.docx
-
-# Specify a ruleset
-papergroom process input.docx -r rules/standard_thesis.yaml -o output.docx
-
-# List built-in rules
-papergroom list-rules
+cp .env.example .env
 ```
 
-## Project Structure
+Then edit `.env`. Pick one provider:
+
+```env
+LLM_PROVIDER=ark                              # ark | openai | local
+
+# Volcengine Ark (stable access in China)
+ARK_API_KEY=your_ark_api_key_here
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+ARK_MODEL=your_endpoint_id_or_model_name
+
+# OpenAI
+# LLM_PROVIDER=openai
+# OPENAI_API_KEY=your_openai_api_key_here
+# OPENAI_MODEL=gpt-4o-mini
+
+# Local model (Ollama / vLLM)
+# LLM_PROVIDER=local
+# LOCAL_BASE_URL=http://localhost:11434/v1
+# LOCAL_MODEL=qwen2.5:7b
+```
+
+## Usage
+
+```bash
+# Format with the built-in thesis rules
+papergroom process input.docx -o output.docx
+
+# Format with your own rules (a .md or .txt file)
+papergroom process input.docx -r my_school_rules.md -o output.docx
+
+# Also dump what the AI decided for each paragraph
+papergroom process input.docx -o output.docx --debug-annotation
+```
+
+If `-o` is omitted, output goes to `<input>_formatted.docx` next to the input.
+
+> **Note:** the `-r` / `--rules` flag currently expects a prose rules file
+> (`.md`/`.txt`), not the YAML ruleset. Wiring the CLI to the YAML ruleset is
+> part of the rework (ROADMAP Phase 3). Until then, `standard_thesis.yaml` is
+> loaded by the rule engine but is not what the CLI uses.
+
+## Project structure
 
 ```
 PaperGroom/
-├── README.md                  # this file
-├── ROADMAP.md                 # development roadmap
-├── .gitignore                 # git ignore rules (includes .env and other secret files)
-├── .env.example               # config template (no real secrets, safe to commit)
-├── LICENSE                    # MIT
-├── rules/                     # formatting rulesets (YAML)
-│   └── standard_thesis.yaml   # built-in standard thesis rules
-├── src/papergroom/            # source code
-│   ├── parser/                # docx parsing layer
-│   ├── ai/                    # AI structure labeling layer
-│   ├── rules/                 # rule engine
-│   ├── writer/                # docx writer layer
-│   └── cli.py                 # CLI entry
+├── pyproject.toml
+├── README.md
+├── ROADMAP.md
+├── .env.example                       # config template (no real secrets)
+├── scripts/                           # dev-only diagnostics, not shipped
+│   ├── diag_llm.py                    # raw LLM call, to debug connectivity
+│   ├── dump_body_xml.py               # walk <w:body> children in document order
+│   └── dump_paragraphs.py             # dump parsed paragraph flags
+├── src/papergroom/
+│   ├── cli.py                         # `papergroom process`
+│   ├── config.py                      # .env loading, provider selection
+│   ├── models.py                      # intermediate representation
+│   ├── parser/docx_parser.py          # docx -> Paragraph list
+│   ├── ai/                            # client.py / prompts.py / labeler.py
+│   ├── rules/
+│   │   ├── applier.py                 # style application (deterministic)
+│   │   ├── loader.py, schema.py       # YAML ruleset loading + validation
+│   │   ├── rules_text.py              # loads the prose rules for the AI
+│   │   ├── default_thesis_rules.md    # domain reference (see the note inside)
+│   │   └── standard_thesis.yaml       # the executable ruleset
+│   └── writer/docx_writer.py          # save, track-changes off
 └── tests/
 ```
 
-## How to Contribute Your Own Formatting Rules
+## Security notes
 
-Once Stage 1 is complete, you can:
+- The repository contains **no API keys, no secrets, and no personal documents**
+- All secret config goes through `.env`, which `.gitignore` excludes
+- `.env.example` holds only `your_xxx_here` placeholders
+- Outputs go to `output/`, also git-ignored
+- If you ever commit a secret, rotate it immediately and purge the history
+  ([GitHub's guide](https://docs.github.com/code-security/secret-scanning/removing-sensitive-data-from-a-repository))
 
-1. Create a new YAML file under `rules/`, modeled on `standard_thesis.yaml`
-2. Define the style for each role (font size, line spacing, alignment, indentation, etc.)
-3. Test with `papergroom process --rules your_rules.yaml`
-4. Open a PR to merge into `rules/community/`
+## Contributing rulesets
 
-For ruleset field definitions and examples, see [docs/rules.md](docs/rules.md) (to be added during Stage 1).
-
-## Development Roadmap
-
-See [ROADMAP.md](ROADMAP.md). It is split into 5 stages:
-
-1. **Stage 1**: MVP core pipeline (parse → label → rules → write)
-2. **Stage 2**: Ruleset ecosystem (multiple built-in rulesets, custom rules)
-3. **Stage 3**: Accuracy and human review
-4. **Stage 4**: Web UI and batch processing
-5. **Stage 5**: Community and ecosystem
-
-## Security Notes
-
-- The repository **does not contain any real API keys / secrets / personal documents**
-- All secret-like config goes through the `.env` file, which is excluded by `.gitignore`
-- `.env.example` is only a template; all values are `your_xxx_here` placeholders
-- Processed documents are output to `output/` by default, which is also git-ignored
-- If you accidentally commit a secret, rotate it immediately and clean the git history (see [GitHub's official guide](https://docs.github.com/code-security/secret-scanning/removing-sensitive-data-from-a-repository))
+Once the rework reaches Phase 3, a ruleset is a YAML file that can `extends` the
+built-in one and override only the fields you care about. That flow doesn't exist
+yet — described here so the target is clear, not as a current capability.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

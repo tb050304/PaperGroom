@@ -1,127 +1,173 @@
 # PaperGroom Development Roadmap
 
-This roadmap breaks PaperGroom into 5 stages, evolving from a minimum viable version to a complete open-source tool.
+**Goal:** take an unformatted Word document and produce one that meets a strict
+thesis formatting spec, with user-supplied rules taking precedence over the
+built-in ones.
 
-> Stages are independent of each other; each stage produces something that can run and be released on its own. It is recommended to proceed in order and only move to the next stage once the previous one is stable.
+## Where we are
 
----
+- **Skeleton** — done (repo, packaging, config, docs).
+- **Stage 1 prototype** — done, runs end to end, but quality is not acceptable.
+  Kept on `main` as a checkpoint commit so nothing is lost.
+- **Rework** — starts now. Phases below.
 
-## Stage 0: Project Skeleton (Done)
+## Why the prototype isn't good enough
 
-**Goal**: Set up an open-source, collaboration-friendly, leak-proof project base.
+Diagnosed against a real target document (an LLM-drafted paper pasted into Word:
+11 paragraphs, all `Normal`, no alignment, no indents, 0 real tables, 0 images):
 
-- [x] Initialize git repo and directory structure
-- [x] `.gitignore` excluding secrets, virtualenvs, and output files
-- [x] `.env.example` config template (no real secrets)
-- [x] README.md describing project purpose and local setup
-- [x] ROADMAP.md
-- [x] MIT License
+```
+[3]  1 研究背景 当前高校课程论文、毕业设计均有严格统一的格式规范……   ← heading + body in ONE paragraph
+[6]  2 系统实验分析 …… 排版方式 平均耗时 (min) 格式正确率 (%) ……      ← a table degraded to a line of text
+[9]  [1] 李华。…… [2] 张强。……                                      ← two references in ONE paragraph
+```
 
-**Output**: An empty-shell repository ready to clone and run.
+1. **The pipeline assumes one paragraph == one semantic unit.** For the target
+   input it isn't. This is why the output is wrong no matter how well the AI
+   labels: a paragraph that is a heading *plus* its body cannot be styled
+   correctly as a single unit. The previous `structurizer/` attempt at fixing
+   this was removed — it was unreferenced and measurably wrong (off-by-one
+   splits, splitting mid-name, missed detections, and a crash on call).
+2. **The AI is asked to emit concrete style values.** It reads a long prose
+   rules document and outputs 12 style fields per paragraph. That is
+   non-deterministic (the same role gets different sizes in different
+   paragraphs), expensive (the whole rules document is resent with every batch),
+   and untestable. It also contradicts the project's own stated principle.
+3. **There is no measurement.** No fixtures, no scoring. Without a number,
+   "the output is bad" can't be turned into progress.
+4. **Two conflicting sources of truth.** The prose rules and `standard_thesis.yaml`
+   disagree on real values (see the status note in `default_thesis_rules.md`).
 
----
+## Target architecture
 
-## Stage 1: MVP Core Pipeline
+Separate *judgment* from *application*. Each layer does one job and is testable alone.
 
-**Goal**: Run the end-to-end flow of `import docx → AI structure labeling → rule engine applies styles → export docx`.
+```
+input.docx
+  │
+  ├─ A. Structure Recovery     deterministic first, AI only as fallback
+  │     split glued blocks into one-semantic-unit blocks;
+  │     detect pseudo-tables and pseudo-lists
+  │
+  ├─ B. Role Labeling          AI, emits role + confidence ONLY
+  │     sliding-window batching + deterministic post-checks
+  │
+  ├─ C. Rule Resolution        YAML, layered: built-in ← user (per-field override)
+  │
+  └─ D. Style Application      100% deterministic
+        → output.docx + a review report
+```
 
-### 1.1 docx Parser Layer (`src/papergroom/parser/`)
-- [ ] Read paragraphs, Runs, styles (`w:pPr` / `w:rPr`)
-- [ ] Extract images (`w:drawing`), tables, formulas (OMML)
-- [ ] Output a unified intermediate structure (paragraph list + role + original style)
+### Invariants
 
-### 1.2 AI Structure Labeling Layer (`src/papergroom/ai/`)
-- [ ] Design the role label set: `title_l1` / `title_l2` / `body` / `figure` / `figure_caption` / `table_caption` / `reference` / `abstract` / `formula` ...
-- [ ] LLM prompt + few-shot examples
-- [ ] Call per segment and merge results
-- [ ] Support configurable model provider (Ark / OpenAI / local)
+1. **Structure before style.** A wrong structure can't be styled right.
+2. **The AI only classifies.** `role` + `confidence`. Never a font size.
+3. **Everything is measurable.** Every change is justified by a number on the fixture set.
+4. **Original objects are protected.** Images, equations (OMML), field codes:
+   outer paragraph properties only, never content.
 
-### 1.3 Rule Engine (`src/papergroom/rules/`)
-- [ ] Define YAML rule format (role → style mapping)
-- [ ] Rule loader and validator
-- [ ] Rule applier: modify `Paragraph` / `Run` styles by role
+### Rule layering (this is how "your rules win" works)
 
-### 1.4 docx Writer Layer (`src/papergroom/writer/`)
-- [ ] Apply styles via python-docx
-- [ ] Protect field objects, formulas, and images from corruption
-- [ ] Output with track changes disabled
+Merge granularity is **role → field**:
 
-### 1.5 CLI Entry (`src/papergroom/cli.py`)
-- [ ] `papergroom process <input.docx> -r <rules.yaml> -o <output.docx>`
-- [ ] `papergroom list-rules`
+```yaml
+# built-in: src/papergroom/rules/standard_thesis.yaml
+styles:
+  body: {font_name_east_asian: 宋体, font_size_pt: 12, alignment: justify, first_line_indent_chars: 2}
+```
+```yaml
+# user: my_school.yaml — only what you want changed
+extends: standard_thesis
+styles:
+  body: {font_size_pt: 14}      # only the size; everything else inherited
+```
+Result: `body` = 宋体 / **14pt** / justified / 2-char indent.
 
-### 1.6 Built-in Standard Thesis Ruleset
-- [ ] `rules/standard_thesis.yaml` (referencing GB/T 7714 and common thesis specs)
+The authoritative format for custom rules is **YAML**. A later "rules assistant"
+may let users describe requirements in natural language and have the AI draft
+the YAML — but the user reviews it, and application stays deterministic.
 
-**Output**: After `pip install -e .`, a paper can be processed from the command line and exported as a docx that conforms to the default format.
+### How styles land in Word
 
-**Completion Criteria**: For a typical paper, correctly identify 80%+ of paragraph roles and apply the corresponding styles.
-
----
-
-## Stage 2: Ruleset Ecosystem
-
-**Goal**: Make "formatting rules" a shareable, reusable resource.
-
-- [ ] Built-in rulesets: GB/T 7714, STEM thesis, humanities & social sciences thesis, journal submission templates
-- [ ] Rule editing documentation and field reference
-- [ ] Rule validator: detect missing fields, out-of-range values, conflicts
-- [ ] Rule preview: show the applied effect on a sample document (screenshots or diff report)
-- [ ] Custom rules directory support (`--rules-dir`)
-
-**Output**: Users can contribute their own rulesets to `rules/community/`.
-
----
-
-## Stage 3: Accuracy and Human Review
-
-**Goal**: Address formatting errors caused by AI mislabeling.
-
-- [ ] AI labeling confidence output
-- [ ] Labeling result visualization report (HTML, highlighting each paragraph's role)
-- [ ] Human correction interface (modify the YAML annotation file and reapply styles)
-- [ ] Few-shot example library (categorized by discipline)
-- [ ] Formula / complex table protection strategy (skip style reflow after detection)
-- [ ] Cross-reference, table of contents, page-number field protection
-
-**Output**: Accuracy improved from 80% to 95%+, with a human fallback entry.
-
----
-
-## Stage 4: Web UI and Batch Processing
-
-**Goal**: Lower the usage barrier; support non-technical users and batch scenarios.
-
-- [ ] Web UI: drag-and-drop upload, select rules, preview, download
-- [ ] Batch processing: directory scan + concurrency
-- [ ] Processing history and result comparison
-- [ ] Multi-model provider switching (Ark / OpenAI / local models)
-- [ ] Deployment documentation (Docker, local deployment)
-
-**Output**: A deployable web service that supports multiple users.
+**Default is direct formatting** (paragraph/run properties). It is predictable,
+doesn't depend on the target template, and avoids theme side effects (Word's
+built-in *Heading 1* is blue with a border by default). The cost is that the
+output carries no semantic styles, so Word's navigation pane and auto-TOC won't
+work. A `--word-styles` opt-in is planned rather than being the default.
 
 ---
 
-## Stage 5: Community and Ecosystem
+## Phases
 
-**Goal**: Establish a sustainable contribution mechanism.
+Each phase ships something runnable, and is judged by a number, not a feeling.
 
-- [ ] Ruleset marketplace (community-contributed rulesets, with ratings and compatibility notes)
-- [ ] Plugin mechanism (custom parsers, custom AI labelers)
-- [ ] Internationalization (English paper formats, other languages)
-- [ ] Documentation site
-- [ ] Contributor guide (CONTRIBUTING.md)
+### Phase 1 — Structure recovery engine + evaluation harness ⭐
 
-**Output**: An open-source project with an active community.
+Highest priority: the target input is a document whose structure is already gone.
+
+- **Block splitting**, deterministic regex first: heading numbering
+  (`^第N章` / `^N ` / `^N.M` / `^N.M.K` / `一、`), references (`^\[\d+\]`),
+  captions (`^图\d` / `^表\d`), pseudo-lists
+- **Pseudo-table detection**: consecutive lines sharing a delimiter structure
+  (tabs / runs of spaces) rebuilt as real Word tables
+- **AI only as fallback** — for paragraphs the regexes can't decide
+- **Character-level splitting with run cloning**, preserving run-level formatting
+- **Evaluation harness**: 5–8 synthetic fixtures under `tests/fixtures/` covering
+  each degradation mode + expected block structure + a scoring script
+
+**Done when:** block-split accuracy ≥ 95% on the fixture set, reproducible by script.
+
+### Phase 2 — Role labeling (AI, classification only)
+
+- Rewrite the prompt to emit `{index, role, confidence}` only, injecting a
+  **compact role summary derived from the YAML** instead of the long prose rules
+- Keep the existing sliding-window batcher (`ai/labeler.py`) — it's the healthiest
+  part of the current code
+- **Deterministic post-checks**: `^\[\d+\]` inside the references section is a
+  `reference`, regardless of what the model said
+- Cache responses so re-runs don't re-bill
+
+**Done when:** role accuracy ≥ 95% on the fixture set, at an order of magnitude
+lower cost than today.
+
+### Phase 3 — Rules engine and style application
+
+- Finalize the YAML schema and implement `extends` + per-field override
+- Adjudicate the prose-vs-YAML conflicts **by hand**, port the agreed values into
+  the YAML, then delete `default_thesis_rules.md`
+- Harden the applier: idempotent, handles paragraphs inside tables, `--word-styles` opt-in
+- Ruleset validator: out-of-range values, missing roles, level conflicts
+
+**Done when:** applied styles match the ruleset field-for-field at 100%
+(deterministic, so this is an assertion, not an estimate).
+
+### Phase 4 — Review loop
+
+- HTML report: role highlighting, confidence, before/after diff
+- Export labels → correct by hand → re-run only the affected parts
+
+**Done when:** a person can find and fix every misclassification in one paper
+within 5 minutes.
+
+### Phase 5 — Polish and usability
+
+- CLI: `list-rules`, `--dry-run`, batch directory processing
+- Rules assistant (natural language → YAML draft → user confirms)
+- Error handling, documentation, release
 
 ---
 
-## Contribution Priority
+## How we measure
 
-If this is your first contribution, consider starting with:
+Every phase ends with numbers produced by the harness, not by impression:
 
-1. Any sub-module of Stage 1 (parser / labeler / rules / writer)
-2. New rulesets in Stage 2 (no code required, just understanding of format specs)
-3. Few-shot example contributions in Stage 3
+| Metric | Target |
+|---|---|
+| Block-split accuracy (Phase 1) | ≥ 95% |
+| Role accuracy (Phase 2) | ≥ 95% |
+| Style conformance vs ruleset (Phase 3) | 100% (asserted) |
+| Images / equations / fields altered | 0 (asserted) |
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the detailed contribution process (to be added after Stage 1).
+## Out of scope for now
+
+Web UI, multi-user deployment, a ruleset marketplace — revisit after Phase 4.
