@@ -15,22 +15,23 @@ those files, a heading and its body text are often a single paragraph, several
 references get glued into one paragraph, and tables survive only as lines of
 plain text. Recovering that structure is the core of the tool, not an afterthought.
 
-## Current status: **pre-rework**
+## Current status: **mid-rework**
 
-The pipeline runs end to end, but **the output quality is not acceptable yet**.
-The architecture is being reworked — see [ROADMAP.md](ROADMAP.md) for the plan
-and the reasoning.
+The pipeline runs end to end, and structure recovery has landed. **The output
+is still not good enough to rely on** — see [ROADMAP.md](ROADMAP.md) for the
+plan and the reasoning.
 
-The two root causes, both addressed by the rework:
+The two root causes:
 
-1. **The pipeline assumes one paragraph equals one semantic unit.** For the target
-   documents that assumption is false, so no amount of labeling accuracy helps —
-   styling a paragraph that contains a heading *and* its body is wrong either way.
-2. **The AI is asked to emit concrete style values** (font sizes, spacing…) after
-   reading a long prose rules document. That is non-deterministic, expensive, and
-   impossible to unit-test — and it contradicts the design principle below.
-
-Until the rework lands, treat this as a working prototype, not a tool to rely on.
+1. ~~**The pipeline assumes one paragraph equals one semantic unit.**~~
+   **Addressed (Phase 1).** Documents often carry a heading and its body — or
+   several bibliography entries — in a single paragraph. Those are now split
+   into one unit per paragraph before anything tries to style them, with the
+   original run formatting preserved.
+2. **The AI is asked to emit concrete style values** (font sizes, spacing…)
+   after reading a long prose rules document. Still open. That is
+   non-deterministic, expensive, impossible to unit-test, and contradicts the
+   design principles below. Phase 3 replaces it with a YAML ruleset.
 
 ## Design principles
 
@@ -121,12 +122,17 @@ PaperGroom/
 ├── scripts/                           # dev-only diagnostics, not shipped
 │   ├── diag_llm.py                    # raw LLM call, to debug connectivity
 │   ├── dump_body_xml.py               # walk <w:body> children in document order
-│   └── dump_paragraphs.py             # dump parsed paragraph flags
+│   ├── dump_paragraphs.py             # dump parsed paragraph flags
+│   └── eval_segmenter.py              # score structure recovery vs fixtures
 ├── src/papergroom/
 │   ├── cli.py                         # `papergroom process`
 │   ├── config.py                      # .env loading, provider selection
 │   ├── models.py                      # intermediate representation
 │   ├── parser/docx_parser.py          # docx -> Paragraph list
+│   ├── structure/                     # recover logical structure
+│   │   ├── patterns.py                #   deterministic text rules
+│   │   ├── segmenter.py               #   split a paragraph into units
+│   │   └── apply.py                   #   replay the split on the XML
 │   ├── ai/                            # client.py / prompts.py / labeler.py
 │   ├── rules/
 │   │   ├── applier.py                 # style application (deterministic)
@@ -136,6 +142,8 @@ PaperGroom/
 │   │   └── standard_thesis.yaml       # the executable ruleset
 │   └── writer/docx_writer.py          # save, track-changes off
 └── tests/
+    ├── fixtures/segment_cases.yaml    # structure-recovery expectations
+    └── test_*.py
 ```
 
 ## Security notes

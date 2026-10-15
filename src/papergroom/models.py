@@ -90,8 +90,17 @@ class Paragraph(BaseModel):
         has_table: True if this paragraph is actually a table (we treat a table
             as one block unit; the paragraph index still advances)
         has_formula: True if the paragraph contains an ``m:oMath`` element
+        has_hyperlink: True if the paragraph contains a ``w:hyperlink``. Such
+            paragraphs are never split (character offsets become ambiguous
+            once text lives inside a nested element).
         original_pPr_xml: serialized ``<w:pPr>`` XML, kept so the writer can
             restore it if the ruleset asks to keep original paragraph properties
+        source_index: the paragraph this one was split out of, or None when
+            the paragraph was never split. Several paragraphs may share a
+            source index.
+        role_hint: deterministic role guess from text patterns alone
+            (``structure.patterns.classify``). A prior for the labeler and a
+            cross-check on its output — not a decision.
         role: assigned role (``UNKNOWN`` until the labeler runs)
         confidence: labeler confidence in ``role`` (0.0 if unlabeled)
         resolved_style: the style the AI decided to apply for this paragraph.
@@ -105,8 +114,11 @@ class Paragraph(BaseModel):
     has_image: bool = False
     has_table: bool = False
     has_formula: bool = False
+    has_hyperlink: bool = False
     is_empty: bool = False
     original_pPr_xml: str | None = None
+    source_index: int | None = None
+    role_hint: Role | None = None
     role: Role = Role.UNKNOWN
     confidence: float = 0.0
     resolved_style: ParagraphStyle | None = None
@@ -118,10 +130,18 @@ class Document(BaseModel):
     The original python-docx ``Document`` object is intentionally NOT stored
     here (it's not pydantic-serializable and carries mutable state). The
     writer re-opens the source file from ``source_path`` to apply styles.
+
+    ``splits`` records how the paragraphs below were derived from the source
+    file, since after structure recovery ``paragraphs`` no longer maps
+    one-to-one onto the docx. It maps a *source* paragraph index to the
+    character ranges of the paragraphs it was split into; a source index
+    absent from the mapping was not split. The writer replays these ranges
+    on the XML so the two stay aligned.
     """
 
     source_path: str
     paragraphs: list[Paragraph] = Field(default_factory=list)
+    splits: dict[int, list[tuple[int, int]]] = Field(default_factory=dict)
 
 
 class LabelEntry(BaseModel):

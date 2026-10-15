@@ -8,8 +8,11 @@ built-in ones.
 
 - **Skeleton** — done (repo, packaging, config, docs).
 - **Stage 1 prototype** — done, runs end to end, but quality is not acceptable.
-  Kept on `main` as a checkpoint commit so nothing is lost.
-- **Rework** — starts now. Phases below.
+  Preserved in history as a checkpoint commit.
+- **Phase 1 — structure recovery** — built and wired in. Paragraphs that hold
+  more than one semantic unit are split before anything tries to style them,
+  measured by a fixture harness. See Phase 1 for what is still open.
+- **Phase 2 onward** — not started.
 
 ## Why the prototype isn't good enough
 
@@ -105,17 +108,50 @@ Each phase ships something runnable, and is judged by a number, not a feeling.
 
 Highest priority: the target input is a document whose structure is already gone.
 
-- **Block splitting**, deterministic regex first: heading numbering
-  (`^第N章` / `^N ` / `^N.M` / `^N.M.K` / `一、`), references (`^\[\d+\]`),
-  captions (`^图\d` / `^表\d`), pseudo-lists
-- **Pseudo-table detection**: consecutive lines sharing a delimiter structure
-  (tabs / runs of spaces) rebuilt as real Word tables
-- **AI only as fallback** — for paragraphs the regexes can't decide
-- **Character-level splitting with run cloning**, preserving run-level formatting
-- **Evaluation harness**: 5–8 synthetic fixtures under `tests/fixtures/` covering
-  each degradation mode + expected block structure + a scoring script
+**Built**
 
-**Done when:** block-split accuracy ≥ 95% on the fixture set, reproducible by script.
+- `structure/segmenter.py` — pure text → segments, applied recursively so rules
+  compose (a chapter heading whose body holds the whole bibliography splits
+  twice: once at the heading, again between entries)
+- `structure/patterns.py` — the rule catalog: merged heading + body, a section
+  word glued on with a colon, merged bibliography entries, caption role hints
+- `structure/apply.py` — character-level splitting of the real XML, cloning
+  runs so run formatting survives; paragraphs carrying an image, equation or
+  hyperlink are never split; source paragraphs are processed right-to-left so
+  indices cannot drift (the previous attempt went forwards and emitted
+  operations for paragraphs that did not exist)
+- `tests/fixtures/segment_cases.yaml` + `scripts/eval_segmenter.py` — 26 cases
+  scored three ways: segment sequence, boundary precision/recall, role hints
+- Wired into the CLI, with a writer-side guard that refuses to write when the
+  model and the file disagree rather than silently mis-styling
+
+**Measured:** 26/26 fixtures · boundary P/R/F1 100% · role hints 39/39.
+
+> **Caveat.** Those fixtures were written by the same hand as the rules, so
+> they are a regression net, not independent evidence. The edge cases were
+> chosen adversarially — cover-page colons, inline citations, years, numbered
+> lists, multi-word Latin headings — and two of them exposed genuine bugs, but
+> the score is not yet a quality claim. Real confidence needs documents the
+> rules have never seen.
+
+**Deferred — pseudo-table recovery.** Rebuilding a table that survives only as
+a line of space-separated text (`排版方式 平均耗时 (min) 格式正确率 (%) 人工排版
+27.3 81.2 …`) requires inferring the column count from content. That is
+substantially harder and much rarer than heading/reference splitting, and a
+false positive would silently mangle ordinary prose. It gets its own phase
+instead of riding along here.
+
+**Still open**
+
+- AI fallback for paragraphs the regexes cannot decide (a heading with no
+  separator before its body: `第1章 绪论本文研究的背景……`)
+- Chinese ordinal headings (`一、引言`) — needs rules validated against real
+  documents before it is safe to guess
+- A heading containing an internal space (`1 研究 背景 当前……`) splits at the
+  first space, not the last; no deterministic signal distinguishes it
+
+**Exit criterion:** the harness holds ≥ 95% as documents it has never seen are
+added to the fixture set.
 
 ### Phase 2 — Role labeling (AI, classification only)
 

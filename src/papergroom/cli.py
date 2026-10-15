@@ -16,6 +16,7 @@ from .ai import label_document
 from .config import get_llm_config, get_processing_config
 from .parser import parse_document
 from .rules.rules_text import resolve_rules_text
+from .structure import structurize
 from .writer import write_document
 
 app = typer.Typer(
@@ -60,11 +61,24 @@ def process(
     doc = parse_document(input)
     console.print(f"  {len(doc.paragraphs)} paragraphs parsed.")
 
-    # 2. Load formatting rules text.
+    # 2. Recover structure. Documents drafted by an LLM and pasted into Word
+    #    often carry a heading and its body — or several references — in a
+    #    single paragraph. Split those before anything tries to style them.
+    before = len(doc.paragraphs)
+    structurize(doc)
+    recovered = len(doc.paragraphs) - before
+    if recovered:
+        console.print(
+            f"[bold]Structure[/bold] {recovered} paragraph(s) recovered from merged text."
+        )
+    else:
+        console.print("[bold]Structure[/bold] no merged paragraphs found.")
+
+    # 3. Load formatting rules text.
     rules_text, rules_source = resolve_rules_text(rules)
     console.print(f"[bold]Rules:[/bold] {rules_source}")
 
-    # 3. Label with AI — the AI reads the rules and decides per-paragraph styles.
+    # 4. Label with AI — the AI reads the rules and decides per-paragraph styles.
     console.print("[bold]Labeling[/bold] paragraphs with AI ...")
     llm_config = get_llm_config()
     processing = get_processing_config(debug_annotation=debug_annotation)
@@ -73,7 +87,7 @@ def process(
     labeled = sum(1 for p in doc.paragraphs if p.role.value != "unknown")
     console.print(f"  {labeled}/{len(doc.paragraphs)} paragraphs labeled.")
 
-    # 4. Apply + write. Styles come from para.resolved_style (set by the AI).
+    # 5. Apply + write. Styles come from para.resolved_style (set by the AI).
     console.print(f"[bold]Writing[/bold] {output} ...")
     out_path = write_document(doc, None, output)
 
@@ -88,7 +102,9 @@ def process(
                     "paragraphs": [
                         {
                             "index": p.index,
+                            "source_index": p.source_index,
                             "role": p.role.value,
+                            "role_hint": p.role_hint.value if p.role_hint else None,
                             "confidence": p.confidence,
                             "text_preview": p.text[:80],
                             "style": (

@@ -52,6 +52,7 @@ def parse_document(source_path: str | Path) -> Document:
         text = para.text or ""
         has_image = _paragraph_has_image(p_xml)
         has_formula = _paragraph_has_math(p_xml)
+        has_hyperlink = _paragraph_has_hyperlink(p_xml)
         pPr_xml = _serialize_pPr(p_xml)
         style_hint = _style_hint(para)
         # A paragraph is "empty" when it has no text AND no embedded object
@@ -67,8 +68,10 @@ def parse_document(source_path: str | Path) -> Document:
                 style_hint=style_hint,
                 has_image=has_image,
                 has_formula=has_formula,
+                has_hyperlink=has_hyperlink,
                 is_empty=is_empty,
                 original_pPr_xml=pPr_xml,
+                source_index=idx,
             )
         )
 
@@ -94,6 +97,16 @@ def _paragraph_has_image(p_xml) -> bool:
 def _paragraph_has_math(p_xml) -> bool:
     """True if the paragraph contains an ``m:oMath`` (OMML) element."""
     return p_xml.find(f".//{{{M_NS}}}oMath") is not None
+
+
+def _paragraph_has_hyperlink(p_xml) -> bool:
+    """True if the paragraph contains a ``w:hyperlink``.
+
+    Hyperlink text lives inside a nested element rather than in a direct
+    ``w:r`` child, so the character offsets the segmenter computes would not
+    line up with the runs. Paragraphs carrying one are never split.
+    """
+    return p_xml.find(f".//{{{W_NS}}}hyperlink") is not None
 
 
 def _serialize_pPr(p_xml) -> str | None:

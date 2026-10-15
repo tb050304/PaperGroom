@@ -1,0 +1,177 @@
+# Structure-recovery fixtures.
+#
+# Each case is one paragraph's text plus the segments expected to come out of
+# it, in order. `role` is the deterministic role hint for that segment, or
+# null when the text alone gives no reliable signal (the AI labeler decides
+# those in a later phase).
+#
+# Cases tagged `source: real` are verbatim excerpts from an LLM-drafted paper
+# that was pasted into Word — the input this tool actually targets. The rest
+# pin down where the rules must NOT fire; a wrong split is worse than a
+# missed one, so most of these assert that we leave the text alone.
+#
+# Scored by scripts/eval_segmenter.py. Run it after changing any rule.
+
+cases:
+  # ------------------------------------------------------------------
+  # Merged heading + body — the dominant real-world damage
+  # ------------------------------------------------------------------
+  - source: real
+    text: "1 研究背景 当前高校课程论文、毕业设计均有严格统一的格式规范，包含标题字号、段落行距。"
+    expect:
+      - {text: "1 研究背景", role: title_l1}
+      - {text: "当前高校课程论文、毕业设计均有严格统一的格式规范，包含标题字号、段落行距。", role: null}
+
+  - source: real
+    text: "1.1 传统排版存在的问题 传统排版完全依赖人工对照模板逐条修改，存在耗时长、出错率高等缺陷。"
+    expect:
+      - {text: "1.1 传统排版存在的问题", role: title_l2}
+      - {text: "传统排版完全依赖人工对照模板逐条修改，存在耗时长、出错率高等缺陷。", role: null}
+
+  - source: real
+    text: "1.2 智能排版技术优势 大模型具备强大的文本语义理解和结构化能力，可以自动识别标题。"
+    expect:
+      - {text: "1.2 智能排版技术优势", role: title_l2}
+      - {text: "大模型具备强大的文本语义理解和结构化能力，可以自动识别标题。", role: null}
+
+  - text: "1.1.1 深度学习的泛化问题 模型在训练集上表现优异，但在测试集上明显下降，差距很大。"
+    expect:
+      - {text: "1.1.1 深度学习的泛化问题", role: title_l3}
+      - {text: "模型在训练集上表现优异，但在测试集上明显下降，差距很大。", role: null}
+
+  - source: real
+    text: "3 结论与展望 本文针对论文格式杂乱、排版低效的问题，结合大模型技术实现了自动格式化。"
+    expect:
+      - {text: "3 结论与展望", role: title_l1}
+      - {text: "本文针对论文格式杂乱、排版低效的问题，结合大模型技术实现了自动格式化。", role: null}
+
+  # ------------------------------------------------------------------
+  # Section word glued to its content with a colon
+  # ------------------------------------------------------------------
+  - source: real
+    text: "摘要：随着信息化教育快速发展，高校学生论文写作数量逐年增加，传统人工排版效率低下。"
+    expect:
+      - {text: "摘要", role: title_l1}
+      - {text: "随着信息化教育快速发展，高校学生论文写作数量逐年增加，传统人工排版效率低下。", role: null}
+
+  - text: "Abstract: Manual formatting of theses is slow and error-prone, so we automate it."
+    expect:
+      - {text: "Abstract", role: title_l1}
+      - {text: "Manual formatting of theses is slow and error-prone, so we automate it.", role: null}
+
+  # Composition: the section split runs first, then the reference split on
+  # what is left. Rules are applied recursively, so both fire.
+  - text: "参考文献：[1] 张三. 深度学习综述[J]. 计算机学报, 2023. [2] 李四. 排版自动化[D]. 清华大学, 2022."
+    expect:
+      - {text: "参考文献", role: title_l1}
+      - {text: "[1] 张三. 深度学习综述[J]. 计算机学报, 2023.", role: reference}
+      - {text: "[2] 李四. 排版自动化[D]. 清华大学, 2022.", role: reference}
+
+  # ------------------------------------------------------------------
+  # Several bibliography entries merged into one paragraph
+  # ------------------------------------------------------------------
+  - source: real
+    text: "[1] 李华。智能文本处理技术应用研究 [J]. 计算机工程与应用，2024,60 (06):99-104. [2] 张强。高校毕业论文格式规范化优化研究 [J]. 高等教育研究，2023,18 (02):45-48."
+    expect:
+      - {text: "[1] 李华。智能文本处理技术应用研究 [J]. 计算机工程与应用，2024,60 (06):99-104.", role: reference}
+      - {text: "[2] 张强。高校毕业论文格式规范化优化研究 [J]. 高等教育研究，2023,18 (02):45-48.", role: reference}
+
+  - text: "[1] 张三. 甲[J]. 学报, 2020. [2] 李四. 乙[J]. 学报, 2021. [3] 王五. 丙[J]. 学报, 2022."
+    expect:
+      - {text: "[1] 张三. 甲[J]. 学报, 2020.", role: reference}
+      - {text: "[2] 李四. 乙[J]. 学报, 2021.", role: reference}
+      - {text: "[3] 王五. 丙[J]. 学报, 2022.", role: reference}
+
+  # ------------------------------------------------------------------
+  # Must NOT split
+  # ------------------------------------------------------------------
+
+  # Cover-page rows contain a colon too. Splitting on any "X：" would destroy
+  # the cover layout, so only whitelisted section words may split.
+  - source: real
+    text: "作者：王同学 "
+    expect:
+      - {text: "作者：王同学", role: null}
+
+  - text: "指导教师： 李教授"
+    expect:
+      - {text: "指导教师： 李教授", role: null}
+
+  # A bare section heading with nothing after the colon.
+  - source: real
+    text: "参考文献： "
+    expect:
+      - {text: "参考文献：", role: title_l1}
+
+  # A section heading with no colon at all.
+  - text: "致谢"
+    expect:
+      - {text: "致谢", role: title_l1}
+
+  # A single bibliography entry is already one unit.
+  - text: "[1] 李华。智能文本处理技术应用研究 [J]. 计算机工程与应用，2024,60 (06):99-104."
+    expect:
+      - {text: "[1] 李华。智能文本处理技术应用研究 [J]. 计算机工程与应用，2024,60 (06):99-104.", role: reference}
+
+  # Inline citations are not bibliography entries. The markers are not
+  # preceded by a sentence terminator, so no split.
+  - text: "研究表明 [1] 与 [2] 存在显著差异，这一结论已被广泛验证。"
+    expect:
+      - {text: "研究表明 [1] 与 [2] 存在显著差异，这一结论已被广泛验证。", role: null}
+
+  # The keyword line is one unit — the label stays attached.
+  - text: "关键词：深度学习；神经网络；图像分类；自动排版"
+    expect:
+      - {text: "关键词：深度学习；神经网络；图像分类；自动排版", role: null}
+
+  # A year at the start of a sentence is not heading numbering.
+  - text: "2024 年研究表明，该方法在多个数据集上都取得了最好的效果。"
+    expect:
+      - {text: "2024 年研究表明，该方法在多个数据集上都取得了最好的效果。", role: null}
+
+  # A numbered list item, not a heading ("1." has no digit after the dot).
+  - text: "1. 首先，我们需要收集足够的训练数据，并对数据进行清洗。"
+    expect:
+      - {text: "1. 首先，我们需要收集足够的训练数据，并对数据进行清洗。", role: null}
+
+  # A body paragraph that merely starts with heading-looking numbering ends
+  # in sentence punctuation, so it is prose and must be left alone.
+  - text: "1 首先需要说明的是，本文所用方法与传统方法存在本质区别。"
+    expect:
+      - {text: "1 首先需要说明的是，本文所用方法与传统方法存在本质区别。", role: null}
+
+  # A heading with no separator before its body is genuinely ambiguous —
+  # we do not guess.
+  - text: "第1章 绪论本文研究的背景与意义如下所述，包含多个方面。"
+    expect:
+      - {text: "第1章 绪论本文研究的背景与意义如下所述，包含多个方面。", role: null}
+
+  # A multi-word Latin heading cannot be separated from its body — the title
+  # is taken as the first token, which would cut mid-phrase ("1.1 Background"
+  # / "and Motivation We study…"). Backed off deliberately.
+  - text: "1.1 Background and Motivation We study the problem of document formatting."
+    expect:
+      - {text: "1.1 Background and Motivation We study the problem of document formatting.", role: null}
+
+  # A single-word Latin heading splits correctly: the body starts upper-case,
+  # as a real body does, so the mid-phrase guard does not apply.
+  - text: "1 Introduction This paper presents a new method for formatting papers."
+    expect:
+      - {text: "1 Introduction", role: title_l1}
+      - {text: "This paper presents a new method for formatting papers.", role: null}
+
+  # ------------------------------------------------------------------
+  # Role hints on unmerged paragraphs
+  # ------------------------------------------------------------------
+  - source: real
+    text: "基于AI在前端中的研究 "
+    expect:
+      - {text: "基于AI在前端中的研究", role: null}
+
+  - text: "图1 系统整体架构示意图"
+    expect:
+      - {text: "图1 系统整体架构示意图", role: figure_caption}
+
+  - text: "表2-1 实验结果对比"
+    expect:
+      - {text: "表2-1 实验结果对比", role: table_caption}

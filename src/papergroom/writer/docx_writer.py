@@ -17,6 +17,7 @@ from lxml import etree
 
 from ..models import Document
 from ..rules.applier import apply_ruleset
+from ..structure.apply import apply_splits
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -47,6 +48,19 @@ def write_document(
 
     # Re-open the source so we start from pristine bytes.
     docx_doc = DocxDocument(doc.source_path)
+
+    # Structure recovery split merged paragraphs in the model; replay the
+    # same cuts on the XML so paragraph indices line back up. The applier
+    # matches model paragraphs to docx paragraphs positionally, so a
+    # mismatch here would silently style the wrong paragraph.
+    apply_splits(docx_doc, doc.splits)
+    if len(docx_doc.paragraphs) != len(doc.paragraphs):
+        raise RuntimeError(
+            "Structure recovery is out of sync with the document: "
+            f"{len(doc.paragraphs)} paragraphs in the model but "
+            f"{len(docx_doc.paragraphs)} in the file. This is a bug — "
+            "refusing to write a mis-styled document."
+        )
 
     apply_ruleset(doc, ruleset, docx_doc)
 
