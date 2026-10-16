@@ -10,9 +10,12 @@ built-in ones.
 - **Stage 1 prototype** — done, runs end to end, but quality is not acceptable.
   Preserved in history as a checkpoint commit.
 - **Phase 1 — structure recovery** — built and wired in. Paragraphs that hold
-  more than one semantic unit are split before anything tries to style them,
-  measured by a fixture harness. See Phase 1 for what is still open.
-- **Phase 2 onward** — not started.
+  more than one semantic unit are split before anything tries to style them.
+  See Phase 1 for what is still open.
+- **Phase 2 — role labeling** — built and wired in. The model now only picks a
+  role; styles come from the ruleset through a deterministic resolver. Not yet
+  measured against a real model — see Phase 2.
+- **Phase 3 onward** — not started.
 
 ## Why the prototype isn't good enough
 
@@ -153,29 +156,65 @@ instead of riding along here.
 **Exit criterion:** the harness holds ≥ 95% as documents it has never seen are
 added to the fixture set.
 
-### Phase 2 — Role labeling (AI, classification only)
+### Phase 2 — Role labeling: the model classifies, nothing else
 
-- Rewrite the prompt to emit `{index, role, confidence}` only, injecting a
-  **compact role summary derived from the YAML** instead of the long prose rules
-- Keep the existing sliding-window batcher (`ai/labeler.py`) — it's the healthiest
-  part of the current code
-- **Deterministic post-checks**: `^\[\d+\]` inside the references section is a
-  `reference`, regardless of what the model said
-- Cache responses so re-runs don't re-bill
+**Built**
 
-**Done when:** role accuracy ≥ 95% on the fixture set, at an order of magnitude
-lower cost than today.
+- `ai/prompts.py` rewritten. The model returns `{index, role, confidence}` and
+  nothing else; the 878-line prose specification it used to read is replaced by
+  a compact role guide plus a style summary **derived from the YAML**, so it
+  cannot drift from what the applier actually does. **~8,400 → ~840 tokens per
+  batch.**
+- Three layers with strict precedence: patterns decide what they can and never
+  reach a model at all; the model decides the rest; the pattern decisions are
+  re-asserted afterwards, so nothing the model says can override them.
+- `structure/patterns.py::certain_role` draws that boundary deliberately narrow.
+  Numbered headings stay out — telling "1 数据收集" (a heading) from a list item
+  needs the surrounding document, so they go to the model as a *hint*.
+- Table-of-contents entries are spotted by their leader dots and never styled
+  as headings, though they are shaped exactly like them.
+- `rules/resolve.py` — role → style, deterministic. This is the half the model
+  never touches.
+- Response caching under `.cache/papergroom/`. The client is built lazily, so a
+  document the patterns fully account for needs no API key at all.
+
+**Measured (offline):** 22 role fixtures — 6 settled by pattern with zero
+errors, 16 left to the model. 169 tests pass.
+
+**Not yet measured:** the model's own accuracy. That needs
+`scripts/eval_roles.py --live`, which calls the real API. Until then the ≥95%
+target is **unverified**, and the fixtures were written by the same hand as the
+rules, so even a good score would be weak evidence on its own.
+
+**Landed here, out of sequence:** the built-in ruleset was completed —
+`document_title` was missing entirely, and `body`, the most common role by far,
+had no font and no line spacing — with its values reconciled against the prose
+spec. The style bridge could not produce sane output otherwise.
 
 ### Phase 3 — Rules engine and style application
 
-- Finalize the YAML schema and implement `extends` + per-field override
-- Adjudicate the prose-vs-YAML conflicts **by hand**, port the agreed values into
-  the YAML, then delete `default_thesis_rules.md`
-- Harden the applier: idempotent, handles paragraphs inside tables, `--word-styles` opt-in
-- Ruleset validator: out-of-range values, missing roles, level conflicts
+Partially landed early, because Phase 2 could not produce sane output without
+it: the built-in ruleset is now complete and reconciled with the prose spec,
+and `rules/resolve.py` connects roles to styles deterministically.
+
+**Remaining**
+
+- **`extends` + per-field override.** A custom ruleset must be able to change
+  one property of one role and inherit the rest. This is the "your rules win"
+  requirement and it does not exist yet — today a custom ruleset is an
+  all-or-nothing replacement.
+- Harden the applier: idempotent, handles paragraphs inside tables, and a
+  `--word-styles` opt-in that maps headings onto Word's built-in styles so the
+  navigation pane and an automatic table of contents work.
+- A ruleset validator: out-of-range values, roles in the taxonomy but missing
+  from the ruleset, conflicting settings.
+- A style field for a *negative* first-line indent, so bibliography entries can
+  get a true hanging indent rather than the block indent they have now.
+- Delete `default_thesis_rules.md` once the YAML carries its reasoning too.
 
 **Done when:** applied styles match the ruleset field-for-field at 100%
-(deterministic, so this is an assertion, not an estimate).
+(deterministic, so this is an assertion rather than an estimate), and a custom
+ruleset that sets one property changes exactly that one property.
 
 ### Phase 4 — Review loop
 

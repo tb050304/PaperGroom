@@ -1,7 +1,12 @@
 """Command-line entry: `papergroom process`.
 
 Wires the layers together:
-  parse → AI label (reads rules + decides styles) → apply → write
+
+    parse → recover structure → label roles (AI) → resolve styles (ruleset) → write
+
+The split matters. The AI only decides *what each paragraph is*; the ruleset
+only decides *how it looks*. Neither layer does the other's job, which is
+what makes the styling reproducible and testable.
 """
 
 from __future__ import annotations
@@ -15,9 +20,12 @@ from rich.console import Console
 from .ai import label_document
 from .config import get_llm_config, get_processing_config
 from .parser import parse_document
-from .rules.rules_text import resolve_rules_text
+from .rules.loader import load_ruleset
+from .rules.resolve import resolve_styles
 from .structure import structurize
 from .writer import write_document
+
+DEFAULT_RULESET = "standard_thesis"
 
 app = typer.Typer(
     name="papergroom",
@@ -42,17 +50,17 @@ def process(
         "-r",
         "--rules",
         help=(
-            "Path to a formatting rules text file (.txt/.md). "
-            "If omitted, the built-in standard thesis rules are used."
+            "Ruleset: a path to a .yaml file, or the name of a built-in. "
+            f"Defaults to the built-in '{DEFAULT_RULESET}'."
         ),
     ),
     debug_annotation: bool = typer.Option(
         False,
         "--debug-annotation",
-        help="Write a JSON dump of AI labels + styles next to the output.",
+        help="Write a JSON dump of the roles and styles next to the output.",
     ),
 ) -> None:
-    """Parse, label with AI (reading formatting rules), apply styles, and export."""
+    """Parse, recover structure, label roles, apply the ruleset, and export."""
     if output is None:
         output = input.parent / f"{input.stem}_formatted.docx"
 
@@ -74,31 +82,39 @@ def process(
     else:
         console.print("[bold]Structure[/bold] no merged paragraphs found.")
 
-    # 3. Load formatting rules text.
-    rules_text, rules_source = resolve_rules_text(rules)
-    console.print(f"[bold]Rules:[/bold] {rules_source}")
+    # 3. Load the ruleset that will decide every style.
+    try:
+        ruleset = load_ruleset(rules or DEFAULT_RULESET)
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]Cannot load ruleset:[/red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[bold]Ruleset:[/bold] {ruleset.name}")
 
-    # 4. Label with AI — the AI reads the rules and decides per-paragraph styles.
-    console.print("[bold]Labeling[/bold] paragraphs with AI ...")
+    # 4. Label roles. The model decides what each paragraph is, and nothing
+    #    about how it looks.
+    console.print("[bold]Labeling[/bold] roles with AI ...")
     llm_config = get_llm_config()
     processing = get_processing_config(debug_annotation=debug_annotation)
-    annotation = label_document(doc, llm_config, rules_text, processing)
+    label_document(doc, llm_config, ruleset, processing)
 
     labeled = sum(1 for p in doc.paragraphs if p.role.value != "unknown")
     console.print(f"  {labeled}/{len(doc.paragraphs)} paragraphs labeled.")
 
-    # 5. Apply + write. Styles come from para.resolved_style (set by the AI).
+    # 5. Resolve styles from the ruleset. Deterministic: the same document
+    #    and ruleset always produce the same styles.
+    resolve_styles(doc, ruleset)
+
+    # 6. Write.
     console.print(f"[bold]Writing[/bold] {output} ...")
     out_path = write_document(doc, None, output)
 
-    # Optional debug dump.
     if debug_annotation:
         dump_path = out_path.with_suffix(".annotations.json")
         dump_path.write_text(
             json.dumps(
                 {
                     "source": doc.source_path,
-                    "rules": rules_source,
+                    "ruleset": ruleset.name,
                     "paragraphs": [
                         {
                             "index": p.index,

@@ -16,6 +16,7 @@ from typing import Any
 from openai import OpenAI
 
 from ..config import LLMConfig
+from .cache import ResponseCache
 
 
 class LLMClient:
@@ -23,12 +24,16 @@ class LLMClient:
 
     Built from :class:`LLMConfig`. The ``complete`` method returns parsed
     JSON when ``response_format`` is requested, otherwise raw text.
+
+    An optional :class:`ResponseCache` short-circuits identical requests,
+    which matters when iterating on the prompt or the rules.
     """
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, cache: ResponseCache | None = None):
         self._config = config
         self._client = OpenAI(api_key=config.api_key, base_url=config.base_url)
         self._model = config.model
+        self._cache = cache
 
     @property
     def model(self) -> str:
@@ -65,5 +70,14 @@ class LLMClient:
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
+        if self._cache is not None:
+            cached = self._cache.get(kwargs)
+            if cached is not None:
+                return cached
+
         resp = self._client.chat.completions.create(**kwargs)
-        return resp.choices[0].message.content or ""
+        content = resp.choices[0].message.content or ""
+
+        if self._cache is not None:
+            self._cache.put(kwargs, content)
+        return content

@@ -145,12 +145,16 @@ class Document(BaseModel):
 
 
 class LabelEntry(BaseModel):
-    """One labeling result for a single paragraph."""
+    """One labeling result for a single paragraph.
+
+    Deliberately carries no style: the labeler decides *what* a paragraph is,
+    and the ruleset decides how it looks. Keeping the two apart is what makes
+    the styling deterministic and testable.
+    """
 
     index: int
     role: Role
     confidence: float
-    style: ParagraphStyle | None = None
 
 
 class Annotation(BaseModel):

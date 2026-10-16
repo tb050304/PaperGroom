@@ -27,6 +27,8 @@ class ProcessingConfig:
     max_tokens_per_batch: int = 6000
     min_confidence: float = 0.6
     debug_annotation: bool = False
+    # Where to cache LLM responses. None disables caching.
+    cache_dir: str | None = ".cache/papergroom"
 
 
 def _load_env() -> None:
@@ -77,6 +79,7 @@ def get_llm_config() -> LLMConfig:
 def get_processing_config(debug_annotation: bool | None = None) -> ProcessingConfig:
     """Build ProcessingConfig from environment, with optional CLI overrides."""
     _load_env()
+    cache_dir = os.getenv("LLM_CACHE_DIR", ".cache/papergroom").strip()
     return ProcessingConfig(
         max_concurrency=_int_env("MAX_CONCURRENCY", 4),
         max_tokens_per_batch=_int_env("MAX_TOKENS_PER_BATCH", 6000),
@@ -84,6 +87,7 @@ def get_processing_config(debug_annotation: bool | None = None) -> ProcessingCon
         debug_annotation=debug_annotation
         if debug_annotation is not None
         else _bool_env("DEBUG_ANNOTATION", False),
+        cache_dir=cache_dir or None,
     )
 
 

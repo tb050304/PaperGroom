@@ -1,30 +1,22 @@
 # Default Thesis Formatting Rules (Built-in)
 
-> **STATUS: reference text, not the executable spec.**
+> **STATUS: human reference only — nothing reads this file.**
 >
-> This document is currently consumed as *prose* by the AI labeler (which is
-> asked to interpret it and emit concrete style values — see `ai/prompts.py`).
-> That approach is being retired: it is non-deterministic, expensive, and
-> untestable. The executable spec for styles is
-> [`standard_thesis.yaml`](standard_thesis.yaml), and the rework is tracked in
-> [`ROADMAP.md`](../../../ROADMAP.md) Phase 3.
+> It used to be pasted into the labeler's prompt, which then asked the model
+> to interpret it and emit concrete style values. That is gone: the labeler
+> now only decides a paragraph's *role*, and styles come from
+> [`standard_thesis.yaml`](standard_thesis.yaml) via
+> [`resolve.py`](resolve.py). No code path loads this document.
 >
-> Until Phase 3 lands, **treat this file as the domain reference and the YAML
-> as the machine truth**. The two currently disagree in at least these places
-> (illustrative, not exhaustive):
+> What remains is the *reasoning* — why each role looks the way it does, and
+> how to tell the roles apart. The YAML carries the numbers. The two were
+> reconciled when the ruleset was completed and now agree; where they ever
+> diverge, **the YAML wins**.
 >
-> | Role | Property | This file | `standard_thesis.yaml` |
-> |---|---|---|---|
-> | `title_l1` | alignment | left | center |
-> | `title_l1` | space_before / space_after | 18pt / 12pt | 24pt / 18pt |
-> | `title_l2` | space_before / space_after | 12pt / 6pt | 18pt / 12pt |
-> | `title_l3` | font_size_pt | 12pt | 13pt |
-> | `title_l3` | space_before_pt | 6pt | 12pt |
-> | `reference` | space_before / space_after | 3pt / 3pt | 0pt / 0pt |
-> | `cover_info` | font_size_pt | only if inconsistent | always 12pt |
->
-> Phase 3 resolves these by human adjudication, ports the agreed values into
-> the YAML, and deletes this file.
+> One nuance the YAML cannot yet express: a true hanging indent for
+> bibliography entries needs a *negative* first-line indent, which the style
+> schema has no field for. `ROADMAP.md` Phase 3 covers that, along with
+> deleting this file once the YAML carries the reasoning too.
 
 These rules describe the standard formatting for a Chinese academic thesis / paper
 (bachelor's, master's, or doctoral level). The AI reads these rules together with

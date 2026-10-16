@@ -1,67 +1,83 @@
 name: standard_thesis
 version: 1
 description: |
-  Built-in ruleset referencing GB/T 7714 and common Chinese thesis specs.
-  Values reflect typical undergraduate / postgraduate thesis requirements:
-  Song-Ti for body text, bold Hei-Ti for headings, Times New Roman for
-  Latin text, 1.5 line spacing. Adjust per your institution's template.
+  Built-in ruleset for Chinese academic theses, referencing GB/T 7714 and
+  common university specifications.
 
-defaults:
-  # Latin / default font
-  font_name: Times New Roman
-  # East Asian font (Chinese / Japanese / Korean)
-  font_name_east_asian: 宋体
-  font_size_pt: 12
-  line_spacing: 1.5
-  alignment: justify
-  first_line_indent_chars: 2
-  color_hex: "000000"
+  Every role states its style in full. Nothing is inherited — a role that
+  omits a property leaves that property exactly as it was in the document,
+  which is deliberate: where the ruleset is silent, the document's own
+  formatting wins.
+
+  The values match `default_thesis_rules.md`, which carries the reasoning
+  behind them. To customise, copy this file and change only what you need.
 
 styles:
+  document_title:
+    font_name: Times New Roman
+    font_name_east_asian: 黑体
+    font_size_pt: 22
+    bold: true
+    alignment: center
+    first_line_indent_chars: 0
+    space_before_pt: 24
+    space_after_pt: 24
+
   title_l1:
+    font_name: Times New Roman
     font_name_east_asian: 黑体
     font_size_pt: 16
     bold: true
-    alignment: center
-    space_before_pt: 24
-    space_after_pt: 18
+    alignment: left
     first_line_indent_chars: 0
+    line_spacing: 1.5
+    space_before_pt: 18
+    space_after_pt: 12
 
   title_l2:
+    font_name: Times New Roman
     font_name_east_asian: 黑体
     font_size_pt: 14
     bold: true
     alignment: left
-    space_before_pt: 18
-    space_after_pt: 12
     first_line_indent_chars: 0
-
-  title_l3:
-    font_name_east_asian: 黑体
-    font_size_pt: 13
-    bold: true
-    alignment: left
+    line_spacing: 1.5
     space_before_pt: 12
     space_after_pt: 6
-    first_line_indent_chars: 0
 
-  body:
+  title_l3:
+    font_name: Times New Roman
+    font_name_east_asian: 黑体
     font_size_pt: 12
-    alignment: justify
-    first_line_indent_chars: 2
-
-  abstract:
-    font_size_pt: 10.5
-    alignment: justify
-    first_line_indent_chars: 2
+    bold: true
+    alignment: left
+    first_line_indent_chars: 0
+    line_spacing: 1.5
     space_before_pt: 6
     space_after_pt: 6
 
-  # Cover page info lines like "Name:    Alice".
-  # These rows rely on SPACE alignment for layout, so we deliberately
-  # leave alignment, indent and font untouched — otherwise the carefully
-  # spaced cover layout breaks. Only optional font size normalization is
-  # allowed here; everything else inherits the original formatting.
+  body:
+    font_name: Times New Roman
+    font_name_east_asian: 宋体
+    font_size_pt: 12
+    alignment: justify
+    first_line_indent_chars: 2
+    line_spacing: 1.5
+    space_before_pt: 0
+    space_after_pt: 0
+
+  abstract:
+    font_name: Times New Roman
+    font_name_east_asian: 宋体
+    font_size_pt: 10.5
+    alignment: justify
+    first_line_indent_chars: 2
+    line_spacing: 1.5
+    space_before_pt: 6
+    space_after_pt: 6
+
+  # Cover rows are laid out with runs of spaces. Anything else we changed
+  # here would risk breaking that layout, so only the size is normalised.
   cover_info:
     font_size_pt: 12
 
@@ -72,56 +88,75 @@ styles:
     space_after_pt: 0
 
   figure_caption:
+    font_name: Times New Roman
     font_name_east_asian: 宋体
     font_size_pt: 10.5
     bold: true
     alignment: center
     first_line_indent_chars: 0
+    line_spacing: 1.25
     space_before_pt: 0
     space_after_pt: 12
 
   table:
     alignment: center
     first_line_indent_chars: 0
+    space_before_pt: 0
+    space_after_pt: 0
 
   table_caption:
+    font_name: Times New Roman
     font_name_east_asian: 宋体
     font_size_pt: 10.5
     bold: true
     alignment: center
     first_line_indent_chars: 0
+    line_spacing: 1.25
     space_before_pt: 12
     space_after_pt: 0
 
+  # left_indent_pt gives the block indent bibliography entries need. A true
+  # hanging indent wants a *negative* first-line indent, which ParagraphStyle
+  # cannot express yet — tracked for Phase 3.
   reference:
+    font_name: Times New Roman
     font_name_east_asian: 宋体
     font_size_pt: 10.5
     alignment: left
     first_line_indent_chars: 0
     left_indent_pt: 21
-    space_before_pt: 0
-    space_after_pt: 0
+    line_spacing: 1.25
+    space_before_pt: 3
+    space_after_pt: 3
 
   list_item:
+    font_name: Times New Roman
+    font_name_east_asian: 宋体
+    font_size_pt: 12
     alignment: left
     first_line_indent_chars: 0
     left_indent_pt: 21
+    line_spacing: 1.5
+    space_before_pt: 0
+    space_after_pt: 0
 
   quote:
+    font_name: Times New Roman
     font_name_east_asian: 楷体
     font_size_pt: 11
     alignment: justify
     first_line_indent_chars: 2
     left_indent_pt: 21
-
-  # formula: keep centered, no first-line indent; the applier will NOT
-  # touch the inner m:oMath content, only the surrounding paragraph style.
-  formula:
-    alignment: center
-    first_line_indent_chars: 0
+    line_spacing: 1.5
     space_before_pt: 6
     space_after_pt: 6
 
-  unknown:
-    # Explicitly empty: the applier leaves the paragraph exactly as-is.
-    {}
+  formula:
+    alignment: center
+    first_line_indent_chars: 0
+    line_spacing: 1.5
+    space_before_pt: 6
+    space_after_pt: 6
+
+  # Explicitly empty: the applier leaves these paragraphs exactly as they are.
+  unknown: {}

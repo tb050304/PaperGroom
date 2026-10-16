@@ -17,21 +17,22 @@ plain text. Recovering that structure is the core of the tool, not an afterthoug
 
 ## Current status: **mid-rework**
 
-The pipeline runs end to end, and structure recovery has landed. **The output
-is still not good enough to rely on** — see [ROADMAP.md](ROADMAP.md) for the
-plan and the reasoning.
+The pipeline runs end to end, and both structural faults are addressed. What
+remains is breadth — tables, custom rulesets, review tooling — rather than
+architecture. See [ROADMAP.md](ROADMAP.md) for the plan and the caveats.
 
-The two root causes:
+1. ~~**The pipeline assumed one paragraph equals one semantic unit.**~~
+   **Addressed.** A heading and its body, or several bibliography entries, are
+   split into one paragraph per unit before anything styles them, with run
+   formatting preserved.
+2. ~~**The AI was asked to emit concrete style values.**~~ **Addressed.** The
+   model now only picks a *role*. Styles come from a YAML ruleset, resolved
+   deterministically afterwards — reproducible, unit-testable, and about 90%
+   cheaper per batch, since the long prose specification is no longer sent.
 
-1. ~~**The pipeline assumes one paragraph equals one semantic unit.**~~
-   **Addressed (Phase 1).** Documents often carry a heading and its body — or
-   several bibliography entries — in a single paragraph. Those are now split
-   into one unit per paragraph before anything tries to style them, with the
-   original run formatting preserved.
-2. **The AI is asked to emit concrete style values** (font sizes, spacing…)
-   after reading a long prose rules document. Still open. That is
-   non-deterministic, expensive, impossible to unit-test, and contradicts the
-   design principles below. Phase 3 replaces it with a YAML ruleset.
+Be careful with the numbers in ROADMAP.md: the fixtures were written by the
+same hand as the rules, so they are a regression net rather than independent
+evidence.
 
 ## Design principles
 
@@ -94,22 +95,24 @@ ARK_MODEL=your_endpoint_id_or_model_name
 ## Usage
 
 ```bash
-# Format with the built-in thesis rules
+# Format with the built-in thesis ruleset
 papergroom process input.docx -o output.docx
 
-# Format with your own rules (a .md or .txt file)
-papergroom process input.docx -r my_school_rules.md -o output.docx
+# Format with your own ruleset (a YAML file)
+papergroom process input.docx -r my_school.yaml -o output.docx
 
-# Also dump what the AI decided for each paragraph
+# Also dump the role and style decided for each paragraph
 papergroom process input.docx -o output.docx --debug-annotation
 ```
 
 If `-o` is omitted, output goes to `<input>_formatted.docx` next to the input.
 
-> **Note:** the `-r` / `--rules` flag currently expects a prose rules file
-> (`.md`/`.txt`), not the YAML ruleset. Wiring the CLI to the YAML ruleset is
-> part of the rework (ROADMAP Phase 3). Until then, `standard_thesis.yaml` is
-> loaded by the rule engine but is not what the CLI uses.
+Only paragraphs the ruleset covers are restyled; anything the ruleset is
+silent about keeps its original formatting.
+
+Responses are cached under `.cache/papergroom/`, so re-running over the same
+document is free until the prompt or the text changes. Set `LLM_CACHE_DIR`
+to move it, or to an empty value to disable caching.
 
 ## Project structure
 
@@ -123,7 +126,8 @@ PaperGroom/
 │   ├── diag_llm.py                    # raw LLM call, to debug connectivity
 │   ├── dump_body_xml.py               # walk <w:body> children in document order
 │   ├── dump_paragraphs.py             # dump parsed paragraph flags
-│   └── eval_segmenter.py              # score structure recovery vs fixtures
+│   ├── eval_segmenter.py              # score structure recovery vs fixtures
+│   └── eval_roles.py                  # score role labeling (--live to call the API)
 ├── src/papergroom/
 │   ├── cli.py                         # `papergroom process`
 │   ├── config.py                      # .env loading, provider selection
@@ -133,16 +137,20 @@ PaperGroom/
 │   │   ├── patterns.py                #   deterministic text rules
 │   │   ├── segmenter.py               #   split a paragraph into units
 │   │   └── apply.py                   #   replay the split on the XML
-│   ├── ai/                            # client.py / prompts.py / labeler.py
+│   ├── ai/                            # role labeling
+│   │   ├── prompts.py                 #   compact role guide (no styles)
+│   │   ├── labeler.py                 #   patterns, then the model, then checks
+│   │   ├── client.py                  #   OpenAI-compatible chat client
+│   │   └── cache.py                   #   response cache
 │   ├── rules/
-│   │   ├── applier.py                 # style application (deterministic)
-│   │   ├── loader.py, schema.py       # YAML ruleset loading + validation
-│   │   ├── rules_text.py              # loads the prose rules for the AI
-│   │   ├── default_thesis_rules.md    # domain reference (see the note inside)
-│   │   └── standard_thesis.yaml       # the executable ruleset
+│   │   ├── standard_thesis.yaml       # the built-in ruleset
+│   │   ├── loader.py, schema.py       # ruleset loading + validation
+│   │   ├── resolve.py                 # role -> style, deterministically
+│   │   ├── applier.py                 # style -> docx
+│   │   └── default_thesis_rules.md    # prose reference; nothing reads it
 │   └── writer/docx_writer.py          # save, track-changes off
 └── tests/
-    ├── fixtures/segment_cases.yaml    # structure-recovery expectations
+    ├── fixtures/                      # expectations the harnesses score against
     └── test_*.py
 ```
 

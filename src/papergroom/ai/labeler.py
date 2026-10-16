@@ -1,165 +1,180 @@
-"""Paragraph role labeler with sliding-window batching.
+"""Paragraph role labeling with sliding-window batching.
 
-Strategy
---------
-A whole paper (thousands of paragraphs) doesn't fit in one LLM call, and
-per-paragraph calls are both expensive and context-poor (the model can't
-tell an H1 from an H2 without seeing siblings). The sliding-window
-batcher splits the difference:
+The labeler answers one question per paragraph — *what is this?* — and
+nothing else. It never decides formatting. Styles come from the ruleset, and
+are resolved deterministically afterwards.
 
-1. Greedy pack paragraphs into a batch until the estimated token count
-   hits ``max_tokens_per_batch``. A paragraph is never split across
-   batches.
-2. Carry the last 1-2 paragraphs of the previous batch as *context only*
-   into the next batch, marked ``context_only:true``. The model sees them
-   (so it can use surrounding text as evidence) but is told not to label
-   them. This avoids re-labeling the same paragraph twice and keeps
-   batch boundaries from cutting semantics in half.
-3. For each batch, call the LLM with JSON-mode response, parse, and
-   merge into the document's :class:`Paragraph` entries.
-4. Confidence below ``min_confidence`` leaves the paragraph's role as
-   ``UNKNOWN`` so the applier skips it (the original style is preserved).
+Three layers, in order of precedence:
 
-Token estimation is intentionally crude (4 chars ≈ 1 token). It doesn't
-need to be exact — we just need to stay under the model's context limit
-with margin. Real tokenization would add a dependency and ~10x latency
-for ~5% better packing, which is a bad trade for an MVP.
+1. **Patterns.** A paragraph that a text pattern settles beyond doubt — a
+   bibliography entry, a bare section word, a short caption — never reaches
+   the model at all. Free, instant, and reproducible.
+2. **The model.** Everything else, batched by a sliding window so it can see
+   enough context to tell a section heading from a list item. It returns a
+   role and a confidence.
+3. **Post-checks.** The pattern decisions are re-asserted after the model
+   responds, so nothing it says can override them.
+
+Why batching: a whole paper doesn't fit in one call, and one call per
+paragraph is both expensive and context-poor — without siblings a model
+cannot tell a level-1 from a level-2 heading. The window splits the
+difference: greedy-pack paragraphs to a token budget, carry the tail of one
+batch into the next as context, never split a paragraph.
+
+Token estimation is deliberately crude (4 chars ≈ 1 token). Real
+tokenisation would add a dependency and ~10x latency for ~5% better packing,
+which is a bad trade.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..config import LLMConfig, ProcessingConfig
-from ..models import Annotation, Document, LabelEntry, Paragraph, ParagraphStyle, Role
+from ..models import Annotation, Document, LabelEntry, Paragraph, Role
+from ..rules.schema import Ruleset
+from ..structure.patterns import certain_role, classify
+from .cache import ResponseCache
 from .client import LLMClient
-from .prompts import build_messages
+from .prompts import FIXED_MARK, build_messages
 
-# Rough chars-per-token estimate. Under-estimating is safe (we pack less),
-# over-estimating risks exceeding context. 4 is a conservative value for
+# Rough chars-per-token estimate. Under-estimating is safe (we pack less);
+# over-estimating risks exceeding the context window. 4 is conservative for
 # mixed CJK + Latin text (CJK is ~2 chars/token, Latin ~4-5).
 _CHARS_PER_TOKEN = 4
 
-# Number of trailing paragraphs to carry into the next batch as context.
+# Trailing paragraphs carried into the next batch as context.
 _CONTEXT_OVERLAP = 2
 
-# Marker prefix for paragraphs that should be used as context, not labeled.
+# Marker for paragraphs carried over purely as context.
 _CONTEXT_PREFIX = "context_only:true"
 
-# Marker for paragraphs whose text is empty but contain an object.
+# Placeholder text for a paragraph whose content is an object.
 _EMPTY_OBJECT_HINT = {
     "image": "[image]",
-    "table": "[table]",
     "formula": "[formula]",
+    "table": "[table]",
 }
+
+# Confidence assigned to a role a pattern decided. It is not a probability —
+# the pattern is a rule, not an estimate — but it has to sort above the
+# threshold that the model's answers are filtered by.
+_PATTERN_CONFIDENCE = 1.0
 
 
 @dataclass
 class _Batch:
-    """One LLM call's worth of paragraphs.
+    """One call's worth of paragraphs.
 
-    ``entries`` are the paragraphs to label. ``context`` are trailing
-    paragraphs from the previous batch, carried over as evidence but
-    excluded from the output.
+    ``items`` are the paragraphs to show, in document order. Some of them may
+    already have a decided role; they are rendered for context but excluded
+    from the expected output. ``context`` holds paragraphs from the previous
+    batch, carried over purely as evidence.
     """
 
-    entries: list[Paragraph]
-    context: list[Paragraph] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.context is None:
-            self.context = []
+    items: list[Paragraph] = field(default_factory=list)
+    context: list[Paragraph] = field(default_factory=list)
 
 
 def label_document(
     doc: Document,
     llm_config: LLMConfig,
-    rules_text: str,
+    ruleset: Ruleset | None,
     processing: ProcessingConfig | None = None,
 ) -> Annotation:
-    """Label every paragraph in ``doc`` in place; return the annotation.
+    """Label every non-empty paragraph of ``doc`` in place; return the result.
 
-    The AI both identifies each paragraph's role AND decides the style
-    properties to apply, based on ``rules_text``. The resolved style is
-    stored on ``para.resolved_style``.
-
-    Args:
-        doc: Parsed document. ``doc.paragraphs[i].role`` and
-            ``resolved_style`` are mutated.
-        llm_config: LLM configuration (provider, key, model).
-        rules_text: The formatting rules (natural language / markdown)
-            that the AI should follow when deciding styles.
-        processing: Optional processing overrides; defaults read from env.
-
-    Returns:
-        An :class:`Annotation` with one entry per labeled paragraph.
-        Paragraphs left as UNKNOWN (low confidence) are included.
+    Mutates ``doc.paragraphs[i].role`` and ``.confidence``. Styles are *not*
+    touched here — see :func:`papergroom.rules.resolve.resolve_styles`.
     """
     if processing is None:
         processing = ProcessingConfig()
 
-    if not doc.paragraphs:
-        return Annotation(entries=[])
-
-    client = LLMClient(llm_config)
     annotation = Annotation(entries=[])
+    if not doc.paragraphs:
+        return annotation
 
-    # Skip empty paragraphs: they carry no text or object for the AI to
-    # reason about, and sending them just burns tokens + adds noise. They
-    # stay role=UNKNOWN and the applier leaves them untouched.
     labelable = [p for p in doc.paragraphs if not p.is_empty]
 
-    for batch in _iter_batches(labelable, processing.max_tokens_per_batch):
-        batch_text = _render_batch(batch)
-        messages = build_messages(batch_text, rules_text)
+    # Fill in the pattern hint for anything that did not come through
+    # structure recovery, so the model sees a hint whenever there is one.
+    for para in labelable:
+        if para.role_hint is None:
+            para.role_hint = classify(para.text)
+
+    # 1. Patterns decide what they can, without asking anyone.
+    decided: dict[int, Role] = {}
+    for para in labelable:
+        role = certain_role(para.text)
+        if role is not None:
+            decided[para.index] = role
+            para.role = role
+            para.confidence = _PATTERN_CONFIDENCE
+
+    # 2. Everything else goes to the model. The client is built lazily: a
+    #    document the patterns fully account for needs no client at all.
+    client: LLMClient | None = None
+    for batch in _iter_batches(labelable, decided, processing.max_tokens_per_batch):
+        batch_text, answerable = _render_batch(batch, decided)
+        if not answerable:
+            continue  # every paragraph here was already settled by a pattern
+
+        if client is None:
+            client = LLMClient(llm_config, _make_cache(processing))
+
+        messages = build_messages(batch_text, ruleset)
         try:
             raw = client.complete(messages)
-            entries = _parse_labels(raw)
-        except Exception as e:
-            # Network / parse failure → leave the whole batch unknown.
-            # We surface the error via stderr rather than crash the run,
-            # so partial results can still be written.
+            parsed = _parse_labels(raw)
+        except Exception as e:  # network or JSON failure
+            # Leave the batch's roles as they are rather than crash the run,
+            # so a partial result can still be written and inspected.
             import sys
 
             print(f"[papergroom] labeling batch failed: {e}", file=sys.stderr)
-            entries = []
+            parsed = []
 
-        # Map entries back to paragraphs. Indices in the response are
-        # relative to the *labeled* paragraphs in the batch (context_only
-        # excluded), in the same order as rendered.
-        labeled = batch.entries
-        for entry in entries:
-            if 0 <= entry.index < len(labeled):
-                para = labeled[entry.index]
-                if entry.confidence >= processing.min_confidence:
-                    para.role = entry.role
-                    para.confidence = entry.confidence
-                    para.resolved_style = entry.style
-                else:
-                    para.role = Role.UNKNOWN
-                    para.confidence = entry.confidence
-                    para.resolved_style = None
-                annotation.entries.append(
-                    LabelEntry(
-                        index=para.index,
-                        role=para.role,
-                        confidence=para.confidence,
-                        style=para.resolved_style,
-                    )
-                )
+        for display_index, role, confidence in parsed:
+            para = answerable.get(display_index)
+            if para is None:
+                continue  # unknown index, or one the model was told to skip
+            if confidence >= processing.min_confidence:
+                para.role = role
+                para.confidence = confidence
+            else:
+                # Below the threshold we record the guess but act on nothing:
+                # an unstyleable paragraph keeps its original formatting.
+                para.role = Role.UNKNOWN
+                para.confidence = confidence
+
+    # 3. Post-checks. Pattern decisions win, whatever the model said.
+    for para in labelable:
+        if para.index in decided:
+            para.role = decided[para.index]
+            para.confidence = _PATTERN_CONFIDENCE
+        annotation.entries.append(
+            LabelEntry(index=para.index, role=para.role, confidence=para.confidence)
+        )
 
     return annotation
 
 
-def _iter_batches(
-    paragraphs: list[Paragraph], max_tokens: int
-) -> list[_Batch]:
-    """Greedy-pack paragraphs into batches with sliding overlap.
+def _make_cache(processing: ProcessingConfig) -> ResponseCache | None:
+    if not processing.cache_dir:
+        return None
+    return ResponseCache(processing.cache_dir)
 
-    Returns a list (not a generator) so callers can inspect the plan and
-    tests can assert on it without consuming.
-    """
+
+# ---------------------------------------------------------------------------
+# Batching
+# ---------------------------------------------------------------------------
+
+
+def _iter_batches(
+    paragraphs: list[Paragraph], decided: dict[int, Role], max_tokens: int
+) -> list[_Batch]:
+    """Greedy-pack paragraphs into batches with a sliding overlap."""
     if not paragraphs:
         return []
 
@@ -169,77 +184,110 @@ def _iter_batches(
     i = 0
     context: list[Paragraph] = []
     while i < len(paragraphs):
-        current: list[Paragraph] = []
-        # Reserve room for context rendering.
-        used = sum(len(_render_paragraph(p, context=True)) for p in context)
+        items: list[Paragraph] = []
+        # Lengths are estimated with a placeholder display index; the real
+        # index shifts by a character or two, which is immaterial against a
+        # budget that is already a rough estimate.
+        used = sum(len(_render_paragraph(p, decided, context=True)) for p in context)
 
         while i < len(paragraphs) and used < max_chars:
-            p = paragraphs[i]
-            text = _render_paragraph(p, context=False)
-            if used + len(text) > max_chars and current:
-                # Would overflow and we already have something in the
-                # batch → flush.
-                break
-            current.append(p)
-            used += len(text)
+            line = _render_paragraph(paragraphs[i], decided, context=False)
+            if used + len(line) > max_chars and items:
+                break  # this paragraph would overflow a batch that has content
+            items.append(paragraphs[i])
+            used += len(line)
             i += 1
 
-        batches.append(_Batch(entries=current, context=list(context)))
-        # Set up overlap: the last _CONTEXT_OVERLAP paragraphs of this
-        # batch become context for the next one.
-        context = current[-_CONTEXT_OVERLAP:] if len(current) > _CONTEXT_OVERLAP else list(current)
+        batches.append(_Batch(items=items, context=list(context)))
+        context = items[-_CONTEXT_OVERLAP:] if len(items) > _CONTEXT_OVERLAP else list(items)
 
     return batches
 
 
-def _render_batch(batch: _Batch) -> str:
-    """Render a batch into the text block sent to the LLM."""
+def _render_batch(
+    batch: _Batch, decided: dict[int, Role]
+) -> tuple[str, dict[int, Paragraph]]:
+    """Render a batch for the model.
+
+    Returns the text and a map from the index the model will quote back to
+    the paragraph it refers to. Only paragraphs with no marker are in the
+    map — those are the only ones the model is asked about.
+
+    Indices are numbered per batch, monotonically, including the context and
+    already-decided lines. Numbering only the answerable lines would make a
+    fixed line and an answerable line claim the same number, and the model
+    would be quoting an ambiguous index.
+    """
     lines: list[str] = []
-    for p in batch.context:
-        lines.append(_render_paragraph(p, context=True))
-    # Re-number the labeled entries from 0 for the model.
-    for local_idx, p in enumerate(batch.entries):
-        lines.append(_render_paragraph(p, context=False, local_index=local_idx))
-    return "\n".join(lines)
+    answerable: dict[int, Paragraph] = {}
+    index = 0
+
+    for para in batch.context:
+        lines.append(_render_paragraph(para, decided, context=True, display_index=index))
+        index += 1
+
+    for para in batch.items:
+        fixed = para.index in decided
+        lines.append(_render_paragraph(para, decided, context=False, display_index=index))
+        if not fixed:
+            answerable[index] = para
+        index += 1
+
+    return "\n".join(lines), answerable
 
 
 def _render_paragraph(
-    p: Paragraph, *, context: bool, local_index: int | None = None
+    para: Paragraph,
+    decided: dict[int, Role],
+    *,
+    context: bool,
+    display_index: int = 0,
 ) -> str:
     """Render one paragraph as a single line.
 
-    Format: ``<idx>: <text>`` with a ``context_only:true`` prefix when
-    carried over. Empty paragraphs containing an object get a hint
-    ([image] / [table] / [formula]) so the model has something to go on.
+    Format: ``<prefix><index>: <text>``. The prefix tells the model what is
+    already known so it does not spend attention on it:
+
+    * ``context_only:true`` — carried from the previous batch, do not label
+    * ``fixed(<role>)``     — settled by a pattern, do not label
+    * ``hint(<role>)``      — a weak pattern guess, may be overruled
     """
-    text = p.text.strip()
+    text = para.text.strip()
     if not text:
-        if p.has_image:
+        if para.has_image:
             text = _EMPTY_OBJECT_HINT["image"]
-        elif p.has_table:
-            text = _EMPTY_OBJECT_HINT["table"]
-        elif p.has_formula:
+        elif para.has_formula:
             text = _EMPTY_OBJECT_HINT["formula"]
+        elif para.has_table:
+            text = _EMPTY_OBJECT_HINT["table"]
 
-    idx = local_index if local_index is not None else p.index
-    prefix = f"{_CONTEXT_PREFIX} " if context else ""
-    return f"{prefix}{idx}: {text}"
+    if context:
+        prefix = f"{_CONTEXT_PREFIX} "
+    elif para.index in decided:
+        prefix = f"{FIXED_MARK}({decided[para.index].value}) "
+    elif para.role_hint is not None:
+        prefix = f"hint({para.role_hint.value}) "
+    else:
+        prefix = ""
+
+    return f"{prefix}{display_index}: {text}"
 
 
-def _parse_labels(raw: str) -> list[LabelEntry]:
-    """Parse the LLM's JSON response into a list of LabelEntry.
+# ---------------------------------------------------------------------------
+# Response parsing
+# ---------------------------------------------------------------------------
 
-    Each entry now carries an optional ``style`` dict (parsed into a
-    :class:`ParagraphStyle`). Only non-None style fields are kept.
 
-    Tolerates minor pollution: if the model wraps JSON in markdown
-    fences or prepends prose, we extract the first ``{...}``` block.
+def _parse_labels(raw: str) -> list[tuple[int, Role, float]]:
+    """Parse the model's JSON into ``(index, role, confidence)`` triples.
+
+    Tolerates the usual pollution — markdown fences, leading prose, an
+    unknown role name — by dropping what it cannot use rather than failing.
     """
     text = raw.strip()
     if not text:
         return []
 
-    # Strip markdown fences if present.
     if text.startswith("```"):
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):
@@ -251,9 +299,8 @@ def _parse_labels(raw: str) -> list[LabelEntry]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
             return []
         try:
             data = json.loads(text[start : end + 1])
@@ -264,40 +311,24 @@ def _parse_labels(raw: str) -> list[LabelEntry]:
     if not isinstance(labels, list):
         return []
 
-    entries: list[LabelEntry] = []
+    out: list[tuple[int, Role, float]] = []
     for item in labels:
         if not isinstance(item, dict):
             continue
-        idx = item.get("index")
-        role_str = item.get("role")
-        conf = item.get("confidence", 0.0)
-        if idx is None or role_str is None:
+        index = item.get("index")
+        role_name = item.get("role")
+        if index is None or role_name is None:
             continue
         try:
-            role = Role(role_str)
+            role = Role(role_name)
         except ValueError:
             continue
         try:
-            conf_f = float(conf)
+            confidence = float(item.get("confidence", 0.0))
         except (TypeError, ValueError):
-            conf_f = 0.0
-
-        # Parse optional style dict. Only keep non-None fields; invalid
-        # fields are dropped (the rest still applies).
-        style_raw = item.get("style")
-        style: ParagraphStyle | None = None
-        if isinstance(style_raw, dict) and style_raw:
-            # Filter out None values and construct the style.
-            clean = {k: v for k, v in style_raw.items() if v is not None}
-            if clean:
-                try:
-                    style = ParagraphStyle(**clean)
-                except (ValueError, TypeError):
-                    # If the AI returned a malformed style, skip it
-                    # (the paragraph keeps its original formatting).
-                    style = None
-
-        entries.append(
-            LabelEntry(index=int(idx), role=role, confidence=conf_f, style=style)
-        )
-    return entries
+            confidence = 0.0
+        try:
+            out.append((int(index), role, confidence))
+        except (TypeError, ValueError):
+            continue
+    return out

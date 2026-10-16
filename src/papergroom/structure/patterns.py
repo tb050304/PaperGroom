@@ -131,6 +131,19 @@ REF_BOUNDARY_BEFORE = re.compile(r"[.。]\s*$")
 FIGURE_CAPTION_RE = re.compile(r"^图\s*\d")
 TABLE_CAPTION_RE = re.compile(r"^表\s*\d")
 
+# ---------------------------------------------------------------------------
+# Table of contents
+# ---------------------------------------------------------------------------
+
+# A TOC entry reads exactly like a heading — "第2章 系统设计 …… 12" — but
+# restyling it as one would wreck the contents page. The leader dots before
+# the page number are what give it away.
+_TOC_LEADER_RE = re.compile(r"[.·…]{4,}\s*\d+\s*$")
+
+
+def is_toc_entry(text: str) -> bool:
+    return _TOC_LEADER_RE.search(text) is not None
+
 
 def heading_level(numbering: str) -> int:
     """Map a numbering token to a heading level.
@@ -142,12 +155,30 @@ def heading_level(numbering: str) -> int:
     return numbering.count(".") + 1
 
 
+# A caption longer than this, or one that ends a sentence, is prose that
+# merely starts with "图1" — "图1 显示了……，可以看出……。"
+_MAX_CAPTION_CHARS = 30
+
+_SENTENCE_END = ("。", "！", "？", ".", "；", ";")
+
+
+def _caption_role(t: str) -> Role | None:
+    """``图1 系统架构图`` -> figure_caption, but not ``图1 显示了……。``"""
+    if len(t) > _MAX_CAPTION_CHARS or t.endswith(_SENTENCE_END):
+        return None
+    if FIGURE_CAPTION_RE.match(t):
+        return Role.FIGURE_CAPTION
+    if TABLE_CAPTION_RE.match(t):
+        return Role.TABLE_CAPTION
+    return None
+
+
 def classify(text: str) -> Role | None:
     """Best-effort role for a segment, from its text alone.
 
     Returns ``None`` when the text gives no reliable signal. These are hints,
-    not verdicts: the AI labeler decides roles, and these serve as a
-    deterministic cross-check on its output.
+    not verdicts: they are shown to the labeler as a prior and used as a
+    cross-check on its output.
 
     The trailing-punctuation guard matters — a body paragraph that merely
     starts with a number ("1 首先，本文……") reads as prose and must not be
@@ -156,6 +187,11 @@ def classify(text: str) -> Role | None:
     t = text.strip()
     if not t:
         return None
+
+    # Checked first: a contents entry otherwise reads as a heading and would
+    # be restyled as one.
+    if is_toc_entry(t):
+        return Role.UNKNOWN
 
     # "参考文献：" / "摘要" — a bare section word, optionally with a colon.
     for word in SPLIT_SECTION_WORDS:
@@ -166,12 +202,33 @@ def classify(text: str) -> Role | None:
         return Role.REFERENCE
 
     m = HEADING_ONLY_RE.match(t)
-    if m and not t.endswith(("。", "！", "？", ".", "；", ";")):
+    if m and not t.endswith(_SENTENCE_END):
         return Role(f"title_l{heading_level(m.group('num'))}")
 
-    if FIGURE_CAPTION_RE.match(t):
-        return Role.FIGURE_CAPTION
-    if TABLE_CAPTION_RE.match(t):
-        return Role.TABLE_CAPTION
+    return _caption_role(t)
 
-    return None
+
+def certain_role(text: str) -> Role | None:
+    """A role decided by pattern alone, with no need to ask the model.
+
+    Deliberately narrower than :func:`classify`. Numbered headings are *not*
+    here: "1 数据收集" is a level-1 heading when it opens a section and a
+    list item when it follows other numbered lines, and telling those apart
+    needs the surrounding document, not one paragraph. Those go to the model
+    with the hint attached.
+
+    What remains is unambiguous from a single line: a bibliography entry, a
+    bare section word, and a short caption.
+    """
+    t = text.strip()
+    if not t:
+        return None
+
+    for word in SPLIT_SECTION_WORDS:
+        if t == word or t in (f"{word}：", f"{word}:"):
+            return Role.TITLE_L1
+
+    if REF_MARKER_RE.match(t):
+        return Role.REFERENCE
+
+    return _caption_role(t)
