@@ -103,6 +103,9 @@ papergroom process input.docx -r my_school.yaml -o output.docx
 
 # Also dump the role and style decided for each paragraph
 papergroom process input.docx -o output.docx --debug-annotation
+
+# Check a ruleset without processing anything
+papergroom validate-rules my_school.yaml
 ```
 
 If `-o` is omitted, output goes to `<input>_formatted.docx` next to the input.
@@ -144,7 +147,9 @@ PaperGroom/
 │   │   └── cache.py                   #   response cache
 │   ├── rules/
 │   │   ├── standard_thesis.yaml       # the built-in ruleset
-│   │   ├── loader.py, schema.py       # ruleset loading + validation
+│   │   ├── schema.py                  # ruleset model + field-by-field merge
+│   │   ├── loader.py                  # loading, extends resolution
+│   │   ├── validate.py                # sanity warnings
 │   │   ├── resolve.py                 # role -> style, deterministically
 │   │   ├── applier.py                 # style -> docx
 │   │   └── default_thesis_rules.md    # prose reference; nothing reads it
@@ -163,11 +168,38 @@ PaperGroom/
 - If you ever commit a secret, rotate it immediately and purge the history
   ([GitHub's guide](https://docs.github.com/code-security/secret-scanning/removing-sensitive-data-from-a-repository))
 
-## Contributing rulesets
+## Custom rulesets
 
-Once the rework reaches Phase 3, a ruleset is a YAML file that can `extends` the
-built-in one and override only the fields you care about. That flow doesn't exist
-yet — described here so the target is clear, not as a current capability.
+A ruleset is a YAML file. It can extend the built-in one and override only what
+it cares about — the merge is per role, per field:
+
+```yaml
+name: my_school
+extends: standard_thesis
+
+styles:
+  body:
+    font_size_pt: 14      # changes only the size
+  title_l1:
+    alignment: center     # changes only the alignment
+```
+
+Everything not mentioned is inherited. In the example above `body` keeps its
+宋体 font, justified alignment, 1.5 line spacing and 2-character indent from
+the built-in ruleset; `title_l1` keeps 黑体, 16pt, bold, and its spacing.
+
+`extends` takes a built-in name or a path (relative paths are resolved against
+the extending file first). Chains work, and cycles are rejected.
+
+Check a ruleset without processing anything:
+
+```bash
+papergroom validate-rules my_school.yaml
+```
+
+Misspelled properties and absurd values are rejected when the file is loaded;
+an unknown role name is reported as a warning, because the style would
+silently never match anything.
 
 ## License
 

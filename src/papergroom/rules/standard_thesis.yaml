@@ -115,15 +115,16 @@ styles:
     space_before_pt: 12
     space_after_pt: 0
 
-  # left_indent_pt gives the block indent bibliography entries need. A true
-  # hanging indent wants a *negative* first-line indent, which ParagraphStyle
-  # cannot express yet — tracked for Phase 3.
+  # A true hanging indent: the "[1]" marker sits at the margin and wrapped
+  # lines are indented by 21pt. The negative first-line indent is expressed
+  # in characters because that is what the schema measures it in — 10.5pt
+  # × -2 = -21pt, cancelling the left indent on the first line only.
   reference:
     font_name: Times New Roman
     font_name_east_asian: 宋体
     font_size_pt: 10.5
     alignment: left
-    first_line_indent_chars: 0
+    first_line_indent_chars: -2.0
     left_indent_pt: 21
     line_spacing: 1.25
     space_before_pt: 3

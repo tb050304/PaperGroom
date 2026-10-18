@@ -1,11 +1,16 @@
-"""Load and validate YAML rulesets.
+"""Load and validate YAML rulesets, resolving ``extends`` chains.
 
-Rulesets are searched in this order:
+Resolution order for any reference (top-level or an ``extends`` value):
 
-1. An explicit path passed to :func:`load_ruleset` (absolute or relative
-   to CWD). Used by ``--rules`` on the CLI.
-2. A name resolved against ``--rules-dir`` (e.g. ``my_thesis``).
-3. The built-in package rulesets shipped under ``papergroom/rules/*.yaml``.
+1. Relative to the file that declared it (for ``extends`` only)
+2. As given, relative to the current directory
+3. A name inside ``rules_dir``
+4. A built-in packaged ruleset
+
+A ruleset may extend another; the chain is resolved depth-first and the
+results merged field by field (see :func:`schema.merge_rulesets`). Cycles are
+rejected rather than silently truncated, because a cycle means the author
+misread their own configuration and any result would be arbitrary.
 """
 
 from __future__ import annotations
@@ -16,55 +21,34 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from .schema import Ruleset
+from .schema import Ruleset, merge_rulesets
+
 
 def load_ruleset(path_or_name: str, rules_dir: str | None = None) -> Ruleset:
-    """Load a ruleset from a path, a name in ``rules_dir``, or built-ins.
+    """Load a ruleset and fully resolve its ``extends`` chain.
 
     Args:
-        path_or_name: Either an existing file path (``foo/bar.yaml``) or a
-            bare name (``standard_thesis``). Names are resolved against
-            ``rules_dir`` first, then built-in package rulesets.
+        path_or_name: An existing file path or a bare name.
         rules_dir: Optional directory to resolve bare names against.
 
     Returns:
-        A validated :class:`Ruleset`.
+        A ruleset whose ``styles`` are complete and whose ``extends`` is None.
 
     Raises:
         FileNotFoundError: If no matching file is found.
-        ValueError: If the YAML is invalid or fails schema validation.
+        ValueError: If the YAML is invalid, fails schema validation, or the
+            ``extends`` chain contains a cycle.
     """
-    # 1. Explicit path
-    candidate = Path(path_or_name)
-    if candidate.exists() and candidate.is_file():
-        return _load_from_file(candidate)
-
-    # 2. Bare name against rules_dir
-    if rules_dir:
-        resolved = _resolve_by_name(path_or_name, Path(rules_dir))
-        if resolved is not None:
-            return _load_from_file(resolved)
-
-    # 3. Built-in package ruleset by name
-    builtin = _resolve_builtin_by_name(path_or_name)
-    if builtin is not None:
-        return _load_from_file(builtin)
-
-    raise FileNotFoundError(
-        f"Ruleset {path_or_name!r} not found as path, "
-        f"in rules_dir={rules_dir!r}, or as a built-in ruleset."
-    )
+    return _load_file(_resolve_ref(path_or_name, rules_dir, base_dir=None), rules_dir, ())
 
 
 def list_rules(rules_dir: str | None = None) -> list[str]:
     """Return the names of available rulesets.
 
     Built-in names come first, then any ``*.yaml`` files in ``rules_dir``.
-    Names are returned without the ``.yaml`` extension.
     """
     names: list[str] = []
 
-    # Built-ins (shipped inside the papergroom.rules package directory)
     try:
         for res in resources.files(__package__).iterdir():
             if res.name.endswith(".yaml"):
@@ -72,24 +56,42 @@ def list_rules(rules_dir: str | None = None) -> list[str]:
     except (FileNotFoundError, ModuleNotFoundError):
         pass
 
-    # User dir
     if rules_dir:
-        d = Path(rules_dir)
-        if d.is_dir():
-            for p in sorted(d.glob("*.yaml")):
-                names.append(p.stem)
+        directory = Path(rules_dir)
+        if directory.is_dir():
+            for path in sorted(directory.glob("*.yaml")):
+                names.append(path.stem)
 
-    # Deduplicate while preserving order
     seen: set[str] = set()
     unique: list[str] = []
-    for n in names:
-        if n not in seen:
-            seen.add(n)
-            unique.append(n)
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            unique.append(name)
     return unique
 
 
-def _load_from_file(path: Path) -> Ruleset:
+# ---------------------------------------------------------------------------
+# Internals
+# ---------------------------------------------------------------------------
+
+
+def _load_file(path: Path, rules_dir: str | None, chain: tuple[Path, ...]) -> Ruleset:
+    resolved = path.resolve()
+    if resolved in chain:
+        route = " -> ".join(p.name for p in (*chain, resolved))
+        raise ValueError(f"Ruleset 'extends' cycle: {route}")
+
+    ruleset = _parse(path)
+    if not ruleset.extends:
+        return ruleset
+
+    base_path = _resolve_ref(ruleset.extends, rules_dir, base_dir=path.parent)
+    base = _load_file(base_path, rules_dir, (*chain, resolved))
+    return merge_rulesets(base, ruleset)
+
+
+def _parse(path: Path) -> Ruleset:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
@@ -102,8 +104,33 @@ def _load_from_file(path: Path) -> Ruleset:
         raise ValueError(f"Ruleset {path} failed validation: {e}") from e
 
 
+def _resolve_ref(ref: str, rules_dir: str | None, base_dir: Path | None) -> Path:
+    """Turn a name or path into an existing file."""
+    if base_dir is not None:
+        relative = base_dir / ref
+        if relative.is_file():
+            return relative
+
+    as_given = Path(ref)
+    if as_given.is_file():
+        return as_given
+
+    if rules_dir:
+        resolved = _resolve_by_name(ref, Path(rules_dir))
+        if resolved is not None:
+            return resolved
+
+    builtin = _resolve_builtin_by_name(ref)
+    if builtin is not None:
+        return builtin
+
+    where = f"relative to {base_dir}, " if base_dir else ""
+    raise FileNotFoundError(
+        f"Ruleset {ref!r} not found {where}in {rules_dir!r}, or as a built-in."
+    )
+
+
 def _resolve_by_name(name: str, rules_dir: Path) -> Path | None:
-    # Allow both "standard_thesis" and "standard_thesis.yaml"
     stem = name.removesuffix(".yaml")
     for candidate in (rules_dir / f"{stem}.yaml", rules_dir / f"{stem}.yml"):
         if candidate.is_file():
@@ -112,20 +139,12 @@ def _resolve_by_name(name: str, rules_dir: Path) -> Path | None:
 
 
 def _resolve_builtin_by_name(name: str) -> Path | None:
-    """Find a built-in ruleset by name.
-
-    Uses importlib.resources to locate files packaged under
-    ``papergroom/rules/``. Returns a concrete Path on disk if found.
-    """
     stem = name.removesuffix(".yaml")
     try:
-        pkg_dir = resources.files(__package__)
-        for res in pkg_dir.iterdir():
+        for res in resources.files(__package__).iterdir():
             if res.name == f"{stem}.yaml":
-                # importlib.resources returns Traversable; for on-disk packages
-                # we can resolve to a Path via as_file().
-                with resources.as_file(res) as p:  # type: ignore[arg-type]
-                    return Path(p)
+                with resources.as_file(res) as path:  # type: ignore[arg-type]
+                    return Path(path)
     except (FileNotFoundError, ModuleNotFoundError):
         pass
     return None

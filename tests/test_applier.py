@@ -17,7 +17,7 @@ from docx.shared import Pt
 from papergroom.models import Document, Paragraph, Role
 from papergroom.rules import load_ruleset
 from papergroom.rules.applier import apply_ruleset
-from papergroom.rules.schema import ParagraphStyle, Ruleset
+from papergroom.rules.schema import ParagraphStyle
 
 
 # ---------- schema / loader ----------
@@ -35,9 +35,6 @@ def test_load_from_yaml_string(tmp_path: Path):
     yaml_text = """
 name: test_rules
 version: 1
-defaults:
-  font_size_pt: 12
-  alignment: justify
 styles:
   title_l1:
     font_size_pt: 16
@@ -49,24 +46,6 @@ styles:
     ruleset = load_ruleset(str(p))
     assert ruleset.name == "test_rules"
     assert ruleset.styles["title_l1"].bold is True
-
-
-def test_ruleset_style_does_not_merge_defaults():
-    """New architecture: defaults are NOT merged into role styles.
-
-    Only the role's explicitly-set fields are returned; everything else
-    is None (= "do not change"). This prevents accidental over-formatting.
-    """
-    ruleset = Ruleset(
-        name="t",
-        defaults=ParagraphStyle(font_size_pt=12, alignment="justify"),
-        styles={"title_l1": ParagraphStyle(font_size_pt=16, bold=True)},
-    )
-    style = ruleset.style_for("title_l1")
-    assert style.font_size_pt == 16
-    assert style.bold is True
-    # alignment is NOT inherited from defaults.
-    assert style.alignment is None
 
 
 def test_schema_rejects_bad_alignment():
@@ -141,6 +120,65 @@ def test_apply_unknown_role_with_empty_style_leaves_paragraph(tmp_path: Path):
 
     # Alignment should be preserved (RIGHT was set above).
     assert docx_doc.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.RIGHT
+
+
+def test_apply_negative_first_line_indent_makes_a_hanging_indent(tmp_path: Path):
+    """A negative first-line indent cancels the left indent on line one."""
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    style = ParagraphStyle(
+        font_size_pt=10.5,
+        first_line_indent_chars=-2.0,
+        left_indent_pt=21,
+    )
+    model = Document(
+        source_path=str(path.resolve()),
+        paragraphs=[
+            Paragraph(
+                index=0,
+                text="[1] 某文献.",
+                role=Role.REFERENCE,
+                resolved_style=style,
+            )
+        ],
+    )
+
+    apply_ruleset(model, None, docx_doc)
+
+    pf = docx_doc.paragraphs[0].paragraph_format
+    assert pf.first_line_indent == Pt(-21)  # 10.5pt × -2
+    assert pf.left_indent == Pt(21)
+
+
+def test_apply_is_idempotent(tmp_path: Path):
+    """Applying the same style twice must change nothing the second time.
+
+    The writer never applies twice today, but idempotence is the property that
+    makes a re-run over already-formatted output safe — and a style written as
+    an *addition* rather than a *replacement* would break it silently.
+    """
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    style = ParagraphStyle(
+        font_size_pt=12,
+        alignment="justify",
+        first_line_indent_chars=2,
+        font_name_east_asian="宋体",
+        line_spacing=1.5,
+        space_before_pt=6,
+        space_after_pt=6,
+    )
+    model = Document(
+        source_path=str(path.resolve()),
+        paragraphs=[
+            Paragraph(index=0, text="First body paragraph.", role=Role.BODY, resolved_style=style),
+            Paragraph(index=1, text="Second body paragraph.", role=Role.BODY, resolved_style=style),
+        ],
+    )
+
+    apply_ruleset(model, None, docx_doc)
+    once = docx_doc.paragraphs[0]._p.xml
+    apply_ruleset(model, None, docx_doc)
+
+    assert docx_doc.paragraphs[0]._p.xml == once
 
 
 def test_apply_east_asian_font_landed_on_run(tmp_path: Path):

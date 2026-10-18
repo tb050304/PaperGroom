@@ -22,6 +22,7 @@ from .config import get_llm_config, get_processing_config
 from .parser import parse_document
 from .rules.loader import load_ruleset
 from .rules.resolve import resolve_styles
+from .rules.validate import validate_ruleset as check_ruleset
 from .structure import structurize
 from .writer import write_document
 
@@ -140,6 +141,25 @@ def process(
         console.print(f"  annotations dumped to {dump_path}")
 
     console.print(f"[green]Done.[/green] Output: {out_path}")
+
+
+@app.command("validate-rules")
+def validate_rules_command(
+    rules: str = typer.Argument(..., help="Ruleset path or built-in name."),
+) -> None:
+    """Load a ruleset (resolving 'extends') and report anything suspicious."""
+    try:
+        ruleset = load_ruleset(rules)
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]Invalid ruleset:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    console.print(f"[bold]{ruleset.name}[/bold]: {len(ruleset.styles)} role styles")
+    warnings = check_ruleset(ruleset)
+    for warning in warnings:
+        console.print(f"[yellow]warning:[/yellow] {warning}")
+    if not warnings:
+        console.print("[green]OK[/green]")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,10 @@ built-in ones.
 - **Phase 2 — role labeling** — built and wired in. The model now only picks a
   role; styles come from the ruleset through a deterministic resolver. Not yet
   measured against a real model — see Phase 2.
-- **Phase 3 onward** — not started.
+- **Phase 3 — rules engine** — mostly landed: `extends` layering, schema
+  validation, `validate-rules`, and a true hanging indent for references.
+  Applier hardening and `--word-styles` remain.
+- **Phase 4 onward** — not started.
 
 ## Why the prototype isn't good enough
 
@@ -193,28 +196,37 @@ spec. The style bridge could not produce sane output otherwise.
 
 ### Phase 3 — Rules engine and style application
 
-Partially landed early, because Phase 2 could not produce sane output without
-it: the built-in ruleset is now complete and reconciled with the prose spec,
-and `rules/resolve.py` connects roles to styles deterministically.
+Mostly landed. The ruleset is layered and validated, and the path from role to
+docx is deterministic.
+
+**Built**
+
+- **`extends` + per-field override** (`schema.merge_styles` / `merge_rulesets`,
+  resolved in `loader.py`). A custom ruleset that sets one property of one role
+  changes exactly that property and inherits the rest. Chains resolve; cycles
+  are rejected. This is the "your rules win" requirement.
+- **Schema validation.** Absurd values (a size in twips, a spacing given as a
+  percentage) and unknown keys are rejected at load time, so a typo in a custom
+  ruleset fails loudly rather than being silently ignored.
+- **`papergroom validate-rules <ref>`** — resolves `extends` and reports roles
+  that can never match, or roles the ruleset is silent about.
+- The built-in ruleset was completed (Phase 2) and reference entries now get a
+  true hanging indent, via a negative first-line indent cancelling the left
+  indent on line one.
+- The dead `defaults` key was removed from the schema: it was never
+  implemented and invited confusion about where inheritance comes from.
 
 **Remaining**
 
-- **`extends` + per-field override.** A custom ruleset must be able to change
-  one property of one role and inherit the rest. This is the "your rules win"
-  requirement and it does not exist yet — today a custom ruleset is an
-  all-or-nothing replacement.
-- Harden the applier: idempotent, handles paragraphs inside tables, and a
-  `--word-styles` opt-in that maps headings onto Word's built-in styles so the
-  navigation pane and an automatic table of contents work.
-- A ruleset validator: out-of-range values, roles in the taxonomy but missing
-  from the ruleset, conflicting settings.
-- A style field for a *negative* first-line indent, so bibliography entries can
-  get a true hanging indent rather than the block indent they have now.
+- Prove and preserve applier idempotence, handle paragraphs inside tables, and
+  add a `--word-styles` opt-in that maps headings onto Word's built-in styles
+  so the navigation pane and an automatic table of contents work.
 - Delete `default_thesis_rules.md` once the YAML carries its reasoning too.
 
-**Done when:** applied styles match the ruleset field-for-field at 100%
-(deterministic, so this is an assertion rather than an estimate), and a custom
-ruleset that sets one property changes exactly that one property.
+**Exit criterion:** applied styles match the ruleset field-for-field at 100%
+(asserted, not estimated), a custom ruleset that sets one property changes
+exactly that property, and applying the same ruleset twice changes nothing the
+second time.
 
 ### Phase 4 — Review loop
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Role(str, Enum):
@@ -36,10 +36,12 @@ class ParagraphStyle(BaseModel):
     """Concrete style for a paragraph and its runs.
 
     All fields optional; a field set to ``None`` means "do not change this
-    property" — the original formatting is preserved. The AI labeler fills
-    in only the properties it explicitly wants to change based on the
-    formatting rules.
+    property" — the original formatting is preserved. Unknown keys are
+    rejected so a typo in a custom ruleset is an error rather than a silently
+    ignored setting.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     font_name: str | None = None
     font_name_east_asian: str | None = None
@@ -71,6 +73,32 @@ class ParagraphStyle(BaseModel):
             if len(v) != 6 or not all(c in "0123456789abcdefABCDEF" for c in v):
                 raise ValueError(
                     f"color_hex must be a 6-digit hex (e.g. 'FF0000'), got {self.color_hex!r}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_ranges(self) -> "ParagraphStyle":
+        """Reject values that are almost certainly unit mistakes.
+
+        The bounds are deliberately wide. They exist to catch a size written
+        in twentieths of a point, or a percentage where a multiplier was
+        meant — not to impose a house style. A negative first-line indent is
+        legitimate: combined with a positive left indent it produces a
+        hanging indent.
+        """
+        bounds = (
+            ("font_size_pt", 4, 200),
+            ("line_spacing", 0.5, 10),
+            ("first_line_indent_chars", -10, 10),
+            ("space_before_pt", 0, 500),
+            ("space_after_pt", 0, 500),
+            ("left_indent_pt", -200, 500),
+        )
+        for name, low, high in bounds:
+            value = getattr(self, name)
+            if value is not None and not (low <= value <= high):
+                raise ValueError(
+                    f"{name} must be between {low} and {high}, got {value}"
                 )
         return self
 
