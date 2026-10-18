@@ -11,12 +11,52 @@ Stage 1 keeps the moving parts minimal; those concerns land in Stage 3
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
+import httpx2
 from openai import OpenAI
 
 from ..config import LLMConfig
 from .cache import ResponseCache
+
+_DEFAULT_TIMEOUT_S = 120.0
+
+
+def resolve_proxy() -> str | None:
+    """The proxy to use, or ``None`` for a direct connection.
+
+    Only explicit environment variables count. ``LLM_PROXY`` wins, then the
+    conventional ``HTTPS_PROXY`` / ``HTTP_PROXY``.
+
+    Why not just let httpx decide: on Windows it also reads the system proxy
+    from the registry. A proxy configured for something else entirely then
+    silently captures API requests and turns a working direct connection into
+    "Connection error" — which is exactly what happened here. A tool that
+    talks to one configured endpoint should not inherit an unrelated OS-wide
+    setting behind the user's back.
+    """
+    return (
+        os.getenv("LLM_PROXY")
+        or os.getenv("HTTPS_PROXY")
+        or os.getenv("HTTP_PROXY")
+        or None
+    )
+
+
+def _timeout() -> float:
+    try:
+        return float(os.getenv("LLM_TIMEOUT", "")) or _DEFAULT_TIMEOUT_S
+    except ValueError:
+        return _DEFAULT_TIMEOUT_S
+
+
+def build_http_client() -> httpx2.Client:
+    kwargs: dict[str, Any] = {"trust_env": False, "timeout": _timeout()}
+    proxy = resolve_proxy()
+    if proxy:
+        kwargs["proxy"] = proxy
+    return httpx2.Client(**kwargs)
 
 
 class LLMClient:
@@ -31,7 +71,11 @@ class LLMClient:
 
     def __init__(self, config: LLMConfig, cache: ResponseCache | None = None):
         self._config = config
-        self._client = OpenAI(api_key=config.api_key, base_url=config.base_url)
+        self._client = OpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            http_client=build_http_client(),
+        )
         self._model = config.model
         self._cache = cache
 
