@@ -74,7 +74,7 @@ cp .env.example .env
 Then edit `.env`. Pick one provider:
 
 ```env
-LLM_PROVIDER=ark                              # ark | openai | local
+LLM_PROVIDER=ark                              # ark | openai | local | custom
 
 # Volcengine Ark (stable access in China)
 ARK_API_KEY=your_ark_api_key_here
@@ -90,7 +90,24 @@ ARK_MODEL=your_endpoint_id_or_model_name
 # LLM_PROVIDER=local
 # LOCAL_BASE_URL=http://localhost:11434/v1
 # LOCAL_MODEL=qwen2.5:7b
+
+# Any other OpenAI-compatible service (DeepSeek, Qwen, Moonshot, Zhipu,
+# SiliconFlow, ...)
+# LLM_PROVIDER=custom
+# LLM_API_KEY=your_key_here
+# LLM_BASE_URL=https://api.deepseek.com/v1
+# LLM_MODEL=deepseek-chat
 ```
+
+Check the configuration without processing a document:
+
+```bash
+python scripts/diag_llm.py
+```
+
+It prints the resolved provider, endpoint, model and proxy, then makes one
+small call, so a failure shows the provider's own message instead of a bare
+"Connection error".
 
 ## Usage
 

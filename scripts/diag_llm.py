@@ -1,76 +1,55 @@
-"""One-shot diagnostic: call the configured LLM and print raw response + error.
+"""Check that the configured LLM endpoint is reachable and answers.
 
-Run: .venv\Scripts\python.exe scripts\diag_llm.py
+Run after editing ``.env``:
+
+    python scripts/diag_llm.py
+
+It prints the resolved provider, endpoint, model and proxy, then makes one
+small call. If that fails, the error is the provider's own message rather
+than a bare "Connection error", which is what makes it useful.
 """
 
 from __future__ import annotations
 
-import json
 import sys
-import traceback
+from pathlib import Path
 
-from dotenv import load_dotenv
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-load_dotenv(".env")
+from papergroom.ai.client import LLMClient, resolve_proxy  # noqa: E402
+from papergroom.config import get_llm_config  # noqa: E402
 
-import os
 
-from openai import OpenAI
+def main() -> int:
+    try:
+        config = get_llm_config()
+    except Exception as e:
+        print(f"CONFIG ERROR: {type(e).__name__}: {e}")
+        print("\nEdit .env in the project root. See .env.example for the shapes.")
+        return 1
 
-api_key = os.getenv("ARK_API_KEY", "")
-base_url = os.getenv("ARK_BASE_URL", "")
-model = os.getenv("ARK_MODEL", "")
+    print(f"provider : {config.provider}")
+    print(f"base_url : {config.base_url}")
+    print(f"model    : {config.model}")
+    print(f"api_key  : (set, {len(config.api_key)} chars)")
+    print(f"proxy    : {resolve_proxy() or '(direct connection)'}")
+    print("-" * 60)
 
-print(f"provider=ark  base_url={base_url}  model={model}")
-print(f"api_key={api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else ''}")
-print("-" * 60)
+    try:
+        client = LLMClient(config)
+        reply = client.complete(
+            [{"role": "user", "content": "Reply with exactly: ok"}],
+            response_format=None,
+        )
+        print(f"OK: {reply.strip()[:100]!r}")
+        return 0
+    except Exception as e:
+        print(f"FAILED: {type(e).__name__}")
+        print(str(e)[:800])
+        print("\nIf the message mentions a subscription or model access, the")
+        print("endpoint is reachable and the problem is the account/provider.")
+        return 1
 
-client = OpenAI(api_key=api_key, base_url=base_url)
 
-messages = [
-    {
-        "role": "system",
-        "content": "Return strict JSON: {\"role\": \"body\", \"confidence\": 0.9}",
-    },
-    {"role": "user", "content": "0: This is a test paragraph."},
-]
-
-# Try 1: with response_format json_object (what the labeler uses)
-print("[try1] chat.completions with response_format=json_object")
-try:
-    resp = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0,
-        response_format={"type": "json_object"},
-    )
-    print("OK:", repr(resp.choices[0].message.content))
-except Exception as e:
-    print("FAIL:", type(e).__name__, str(e)[:500])
-
-print("-" * 60)
-
-# Try 2: without response_format
-print("[try2] chat.completions WITHOUT response_format")
-try:
-    resp = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0,
-    )
-    print("OK:", repr(resp.choices[0].message.content))
-except Exception as e:
-    print("FAIL:", type(e).__name__, str(e)[:500])
-
-print("-" * 60)
-
-# Try 3: minimal ping
-print("[try3] minimal ping")
-try:
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": "say hi"}],
-    )
-    print("OK:", repr(resp.choices[0].message.content)[:200])
-except Exception as e:
-    print("FAIL:", type(e).__name__, str(e)[:500])
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -41,8 +41,22 @@ def _load_env() -> None:
 def get_llm_config() -> LLMConfig:
     """Build an LLMConfig from environment variables.
 
-    Provider is selected via ``LLM_PROVIDER`` (ark | openai | local). For each
-    provider a matching ``(api_key, base_url, model)`` triple is read.
+    Provider is selected via ``LLM_PROVIDER``. For each provider a matching
+    ``(api_key, base_url, model)`` triple is read:
+
+    ``ark``
+        Volcengine Ark. ``ARK_API_KEY`` / ``ARK_BASE_URL`` / ``ARK_MODEL``.
+    ``openai``
+        OpenAI itself. ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL`` /
+        ``OPENAI_MODEL``.
+    ``local``
+        Ollama, vLLM, LM Studio. ``LOCAL_*``; the key defaults to ``local``
+        because local servers usually ignore it.
+    ``custom``
+        Any other OpenAI-compatible endpoint, with neutral names:
+        ``LLM_API_KEY`` / ``LLM_BASE_URL`` / ``LLM_MODEL``. Use this for
+        DeepSeek, Qwen/DashScope, Moonshot, Zhipu, SiliconFlow, and the like —
+        all of them speak the OpenAI protocol, they are just not OpenAI.
     """
     _load_env()
     provider = (os.getenv("LLM_PROVIDER") or "ark").strip().lower()
@@ -59,8 +73,20 @@ def get_llm_config() -> LLMConfig:
         api_key = os.getenv("LOCAL_API_KEY", "local")
         base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:11434/v1")
         model = os.getenv("LOCAL_MODEL", "qwen2.5:7b")
+    elif provider == "custom":
+        api_key = os.getenv("LLM_API_KEY", "")
+        base_url = os.getenv("LLM_BASE_URL", "")
+        model = os.getenv("LLM_MODEL", "")
+        if not base_url:
+            raise ValueError(
+                "LLM_PROVIDER=custom requires LLM_BASE_URL "
+                "(e.g. https://api.deepseek.com/v1)."
+            )
     else:
-        raise ValueError(f"Unknown LLM_PROVIDER: {provider!r}")
+        raise ValueError(
+            f"Unknown LLM_PROVIDER: {provider!r}. "
+            "Use ark | openai | local | custom."
+        )
 
     if not api_key:
         raise ValueError(
