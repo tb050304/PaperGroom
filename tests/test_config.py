@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from papergroom import config as config_module
 from papergroom.config import get_llm_config
 
 _PROVIDER_VARS = (
@@ -25,6 +26,8 @@ _PROVIDER_VARS = (
 
 @pytest.fixture(autouse=True)
 def _clear(monkeypatch):
+    # Never let the developer's real .env leak into these assertions.
+    monkeypatch.setattr(config_module, "_load_env", lambda: None)
     for name in _PROVIDER_VARS:
         monkeypatch.delenv(name, raising=False)
 

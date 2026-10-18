@@ -13,8 +13,8 @@ built-in ones.
   more than one semantic unit are split before anything tries to style them.
   See Phase 1 for what is still open.
 - **Phase 2 — role labeling** — built and wired in. The model now only picks a
-  role; styles come from the ruleset through a deterministic resolver. Not yet
-  measured against a real model — see Phase 2.
+  role; styles come from the ruleset through a deterministic resolver.
+  Measured live at 95.5% (21/22) on DeepSeek `deepseek-chat`.
 - **Phase 3 — rules engine** — mostly landed: `extends` layering, schema
   validation, `validate-rules`, and a true hanging indent for references.
   Applier hardening and `--word-styles` remain.
@@ -184,10 +184,26 @@ added to the fixture set.
 **Measured (offline):** 22 role fixtures — 6 settled by pattern with zero
 errors, 16 left to the model. 169 tests pass.
 
-**Not yet measured:** the model's own accuracy. That needs
-`scripts/eval_roles.py --live`, which calls the real API. Until then the ≥95%
-target is **unverified**, and the fixtures were written by the same hand as the
-rules, so even a good score would be weak evidence on its own.
+**Measured live** against DeepSeek `deepseek-chat`: **95.5% (21/22)**, the
+Phase 2 target. The one miss is "待补充。" classified as body at exactly the
+0.60 threshold; it is a placeholder and either answer is defensible.
+
+That number needed two fixes before it meant anything — both were real bugs
+that the first live run exposed:
+
+- The fixtures were grouped by category instead of document order, so the
+  model saw an abstract paragraph a dozen items away from its 摘要 heading and
+  could not know it was abstract. The harness was measuring a situation the
+  real pipeline never creates. The fixtures are now in document order.
+- The prompt told the model to label "every paragraph that carries no
+  marker", but `hint(...)` lines carry a marker and *do* need an answer. The
+  model dutifully skipped them. Fixed, plus a fallback: when the model drops
+  a line that has a hint, the hint is used at confidence 0.5 rather than
+  leaving the paragraph unlabelled.
+
+The fixtures still share an author with the rules, so this is a regression
+number rather than independent proof. Confidence comes from running on
+documents nobody tuned against.
 
 **Landed here, out of sequence:** the built-in ruleset was completed —
 `document_title` was missing entirely, and `body`, the most common role by far,

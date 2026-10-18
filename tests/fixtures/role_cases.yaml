@@ -3,50 +3,25 @@
 # Each case is one paragraph (already a single semantic unit — structure
 # recovery has run) and the role it should be given.
 #
-# `pattern: true` means a text pattern must settle it with no model call at
-# all. Everything else is the model's call, and is only checked end to end by
-# `scripts/eval_roles.py --live`, which needs an API key.
+# **Order matters.** Cases are listed in document order, because that is how
+# the real pipeline presents them: the model sees a sliding window and uses
+# neighbours as evidence. An abstract paragraph is only recognizable as one
+# when the 摘要 heading precedes it. Grouping the cases by category made the
+# live evaluation unfair to the model — it scored abstract as body because
+# the heading was a dozen paragraphs away.
 #
-# The offline half of the harness — the part that runs in pytest — asserts two
-# things: that every `pattern: true` case is decided correctly and without the
-# model, and that no case marked otherwise is claimed by a pattern. Getting
-# the second wrong is the dangerous direction: a pattern that grabs a
-# paragraph the model should have judged produces a confidently wrong style.
+# `pattern: true` means a text pattern must settle it with no model call at
+# all. Everything else is the model's call, checked end to end by
+# `scripts/eval_roles.py --live`.
+#
+# The offline half — the part that runs in pytest — asserts two things: that
+# every `pattern: true` case is decided correctly and without the model, and
+# that no case marked otherwise is claimed by a pattern. Getting the second
+# wrong is the dangerous direction: a pattern that grabs a paragraph the
+# model should have judged produces a confidently wrong style.
 
 cases:
-  # ------------------------------------------------------------------
-  # Decided by pattern — no model call
-  # ------------------------------------------------------------------
-  - text: "参考文献："
-    role: title_l1
-    pattern: true
-
-  - text: "摘要"
-    role: title_l1
-    pattern: true
-
-  - text: "致谢"
-    role: title_l1
-    pattern: true
-
-  - text: "[1] 李华。智能文本处理技术应用研究 [J]. 计算机工程与应用，2024,60 (06):99-104."
-    role: reference
-    pattern: true
-
-  - text: "图1 系统整体架构示意图"
-    role: figure_caption
-    pattern: true
-
-  - text: "表2-1 实验结果对比"
-    role: table_caption
-    pattern: true
-
-  # ------------------------------------------------------------------
-  # The model decides
-  # ------------------------------------------------------------------
-
-  # The document title and cover rows look like nothing else — but the model
-  # has to know that, not a regex.
+  # --- cover page ---
   - text: "基于深度学习的图像分类方法研究"
     role: document_title
 
@@ -56,53 +31,71 @@ cases:
   - text: "指导教师： 李教授"
     role: cover_info
 
-  # Numbered headings need the surrounding document (a heading opens a
-  # section; a list item follows other numbered lines), so they are a hint
-  # for the model, never a verdict.
-  - text: "1 研究背景"
+  # --- abstract ---
+  - text: "摘要"
+    role: title_l1
+    pattern: true
+
+  - text: "随着信息化教育快速发展，高校学生论文写作数量逐年增加，传统人工排版方式效率低下。"
+    role: abstract
+
+  - text: "关键词：深度学习；神经网络；图像分类；自动排版"
+    role: abstract
+
+  # --- table of contents ---
+  - text: "第2章 系统设计 ………………………………………………… 12"
+    role: unknown
+
+  # --- body ---
+  - text: "第1章 绪论"
     role: title_l1
 
-  - text: "第1章 绪论"
+  - text: "当前高校课程论文、毕业设计均有严格统一的格式规范，包含标题字号、段落行距、首行缩进等多项要求。"
+    role: body
+
+  - text: "1 研究背景"
     role: title_l1
 
   - text: "1.1 传统排版存在的问题"
     role: title_l2
 
-  - text: "1.1.1 深度学习的泛化问题"
-    role: title_l3
-
-  # Prose.
-  - text: "当前高校课程论文、毕业设计均有严格统一的格式规范，包含标题字号、段落行距、首行缩进等多项要求。"
-    role: body
-
   - text: "传统排版完全依赖人工对照模板逐条修改，存在耗时长、出错率高、格式不统一等缺陷。"
     role: body
 
-  # The abstract section: text between 摘要 and 关键词.
-  - text: "随着信息化教育快速发展，高校学生论文写作数量逐年增加，传统人工排版方式效率低下。"
-    role: abstract
+  - text: "1.1.1 深度学习的泛化问题"
+    role: title_l3
 
-  # The keyword line belongs to the abstract section, label attached.
-  - text: "关键词：深度学习；神经网络；图像分类；自动排版"
-    role: abstract
-
-  # A numbered list inside the body, not a heading — distinguished from
-  # "1 研究背景" by its peers, which only the model can see.
   - text: "（1）首先收集原始论文数据，并清洗掉明显异常的样本。"
     role: list_item
 
   - text: "（2）其次对文本进行分句与结构识别，得到段落级标签。"
     role: list_item
 
-  # A quoted block, indented and in a different face.
   - text: "正如有学者所指出的：“排版自动化并不是要取代作者，而是把人从重复劳动中解放出来。”"
     role: quote
 
-  # A table of contents entry looks exactly like a heading but must not be
-  # styled as one.
-  - text: "第2章 系统设计 ………………………………………………… 12"
-    role: unknown
+  # --- figures and tables ---
+  - text: "图1 系统整体架构示意图"
+    role: figure_caption
+    pattern: true
 
-  # A paragraph that gave the model nothing to work with.
+  - text: "表2-1 实验结果对比"
+    role: table_caption
+    pattern: true
+
+  # --- bibliography and closing sections ---
+  - text: "参考文献："
+    role: title_l1
+    pattern: true
+
+  - text: "[1] 李华。智能文本处理技术应用研究 [J]. 计算机工程与应用，2024,60 (06):99-104."
+    role: reference
+    pattern: true
+
+  - text: "致谢"
+    role: title_l1
+    pattern: true
+
+  # A placeholder: no reliable signal.
   - text: "待补充。"
     role: unknown

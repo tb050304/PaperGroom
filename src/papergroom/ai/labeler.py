@@ -37,7 +37,7 @@ from ..rules.schema import Ruleset
 from ..structure.patterns import certain_role, classify
 from .cache import ResponseCache
 from .client import LLMClient
-from .prompts import FIXED_MARK, build_messages
+from .prompts import CONTEXT_MARK, FIXED_MARK, build_messages
 
 # Rough chars-per-token estimate. Under-estimating is safe (we pack less);
 # over-estimating risks exceeding the context window. 4 is conservative for
@@ -46,9 +46,6 @@ _CHARS_PER_TOKEN = 4
 
 # Trailing paragraphs carried into the next batch as context.
 _CONTEXT_OVERLAP = 2
-
-# Marker for paragraphs carried over purely as context.
-_CONTEXT_PREFIX = "context_only:true"
 
 # Placeholder text for a paragraph whose content is an object.
 _EMPTY_OBJECT_HINT = {
@@ -61,6 +58,11 @@ _EMPTY_OBJECT_HINT = {
 # the pattern is a rule, not an estimate — but it has to sort above the
 # threshold that the model's answers are filtered by.
 _PATTERN_CONFIDENCE = 1.0
+
+# Confidence recorded when a hint has to stand in for a missing model answer.
+# Below the model's acceptance threshold on purpose: it is a guess, not a
+# judgement, and the number should not pretend otherwise.
+_HINT_FALLBACK_CONFIDENCE = 0.5
 
 
 @dataclass
@@ -135,10 +137,12 @@ def label_document(
             print(f"[papergroom] labeling batch failed: {e}", file=sys.stderr)
             parsed = []
 
+        answered: set[int] = set()
         for display_index, role, confidence in parsed:
             para = answerable.get(display_index)
             if para is None:
                 continue  # unknown index, or one the model was told to skip
+            answered.add(para.index)
             if confidence >= processing.min_confidence:
                 para.role = role
                 para.confidence = confidence
@@ -147,6 +151,13 @@ def label_document(
                 # an unstyleable paragraph keeps its original formatting.
                 para.role = Role.UNKNOWN
                 para.confidence = confidence
+
+        # A model that silently drops a line should not cost us the pattern
+        # hint. This is not overriding a decision — there was no decision.
+        for para in answerable.values():
+            if para.index not in answered and para.role_hint is not None:
+                para.role = para.role_hint
+                para.confidence = _HINT_FALLBACK_CONFIDENCE
 
     # 3. Post-checks. Pattern decisions win, whatever the model said.
     for para in labelable:
@@ -262,7 +273,7 @@ def _render_paragraph(
             text = _EMPTY_OBJECT_HINT["table"]
 
     if context:
-        prefix = f"{_CONTEXT_PREFIX} "
+        prefix = f"{CONTEXT_MARK} "
     elif para.index in decided:
         prefix = f"{FIXED_MARK}({decided[para.index].value}) "
     elif para.role_hint is not None:

@@ -28,6 +28,8 @@ from ..rules.schema import Ruleset
 FIXED_MARK = "fixed"
 # Marks a weak pattern guess, offered as a prior. The model may disagree.
 HINT_MARK = "hint"
+# Marks a paragraph carried over from the previous batch purely as context.
+CONTEXT_MARK = "context_only:true"
 
 # One line per role, chosen to separate it from its nearest neighbour.
 # Deliberately terse: a longer list would drift back toward the document this
@@ -89,7 +91,9 @@ carry a marker before the index:
   {hint_mark}(<role>)  — a weak guess from a text pattern. It is often right,
                           but you decide; disagree if the text says otherwise.
 
-Your task: assign a role to every paragraph that carries no marker.
+Your task: assign a role to every paragraph NOT marked {context_mark} or
+{fixed_mark}(...). A {hint_mark}(...) line still needs your answer — the hint
+is a prior, not a decision.
 
 ROLES
 {roles}
@@ -104,7 +108,7 @@ strongest clue about what the paragraph is:
 RETURN STRICT JSON ONLY, in this shape:
 {{"labels": [{{"index": 0, "role": "body", "confidence": 0.93}}]}}
 
-- One entry per input line that carries no marker.
+- One entry per line not marked {context_mark} or {fixed_mark}(...).
 - "role" must be one of the role names above, spelled exactly.
 - "confidence" is a float in [0,1]. Be honest: 0.9+ only when the evidence is
   clear, and use "unknown" rather than guessing at 0.5.
@@ -149,6 +153,7 @@ def build_messages(batch_text: str, ruleset: Ruleset | None) -> list[dict[str, s
     system = SYSTEM_PROMPT.format(
         fixed_mark=FIXED_MARK,
         hint_mark=HINT_MARK,
+        context_mark=CONTEXT_MARK,
         roles=render_roles(),
         styles=style_summary(ruleset),
     )

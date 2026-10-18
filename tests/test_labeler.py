@@ -179,6 +179,22 @@ def test_a_failing_batch_does_not_abort_the_run(monkeypatch, capsys):
     assert "labeling batch failed" in capsys.readouterr().err
 
 
+def test_a_dropped_line_falls_back_to_its_hint(monkeypatch):
+    """If the model omits a line, a pattern hint still beats UNKNOWN.
+
+    Observed against a real model: given a line marked ``hint(title_l1)`` it
+    sometimes returned nothing for it. That is a protocol slip, not a
+    judgement, so there is nothing to override.
+    """
+    doc = _doc("1.1 传统排版存在的问题")
+    _install(monkeypatch, _MockClient(['{"labels": []}']))
+
+    label_document(doc, _llm_config(), None, _processing())
+
+    assert doc.paragraphs[0].role == Role.TITLE_L2
+    assert doc.paragraphs[0].confidence == 0.5
+
+
 def test_empty_document_makes_no_call(monkeypatch):
     doc = Document(source_path="x.docx", paragraphs=[])
     monkeypatch.setattr(
