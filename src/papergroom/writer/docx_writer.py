@@ -26,6 +26,8 @@ def write_document(
     doc: Document,
     ruleset,
     output_path: str | Path,
+    *,
+    word_styles: bool = False,
 ) -> Path:
     """Open the source docx, apply styles, save to ``output_path``.
 
@@ -39,6 +41,8 @@ def write_document(
         ruleset: Unused (kept for API compatibility). Pass None.
         output_path: Destination .docx path. Parent directory is created
             if missing.
+        word_styles: Also map headings onto Word's built-in Heading styles so
+            the navigation pane and an automatic table of contents work.
 
     Returns:
         The resolved output path.
@@ -62,7 +66,7 @@ def write_document(
             "refusing to write a mis-styled document."
         )
 
-    apply_ruleset(doc, ruleset, docx_doc)
+    apply_ruleset(doc, ruleset, docx_doc, word_styles=word_styles)
 
     _disable_track_changes(docx_doc)
 

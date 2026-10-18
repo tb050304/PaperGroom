@@ -101,12 +101,24 @@ papergroom process input.docx -o output.docx
 # Format with your own ruleset (a YAML file)
 papergroom process input.docx -r my_school.yaml -o output.docx
 
+# Also map headings onto Word's built-in styles, so the navigation pane and
+# an automatic table of contents work
+papergroom process input.docx -o output.docx --word-styles
+
 # Also dump the role and style decided for each paragraph
 papergroom process input.docx -o output.docx --debug-annotation
 
 # Check a ruleset without processing anything
 papergroom validate-rules my_school.yaml
 ```
+
+`--word-styles` is off by default because direct formatting is more
+predictable. When it is on, headings get Word's built-in Heading 1/2/3 styles
+in addition to the ruleset's formatting, and the theme colour those styles
+carry is neutralised to black unless the ruleset sets a colour. The styles
+are matched by name across English and Chinese, and by the id the document
+actually uses — files from converters do not always call Heading 1
+`Heading1`.
 
 If `-o` is omitted, output goes to `<input>_formatted.docx` next to the input.
 

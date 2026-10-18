@@ -215,12 +215,18 @@ docx is deterministic.
   indent on line one.
 - The dead `defaults` key was removed from the schema: it was never
   implemented and invited confusion about where inheritance comes from.
+- **`--word-styles` opt-in** maps headings onto Word's built-in Heading 1/2/3
+  (and the document title onto Title), so the navigation pane and an automatic
+  table of contents work. Styles are matched by normalized name in English and
+  Chinese, then applied by the id the document actually uses — a document from
+  a converter called Normal "a" and Heading 1 "1", so id-based lookup would
+  have silently done nothing. The theme colour those styles carry is
+  neutralised unless the ruleset sets one. Applier idempotence is asserted.
 
 **Remaining**
 
-- Prove and preserve applier idempotence, handle paragraphs inside tables, and
-  add a `--word-styles` opt-in that maps headings onto Word's built-in styles
-  so the navigation pane and an automatic table of contents work.
+- Handle paragraphs inside real tables (they are currently skipped entirely,
+  which is safe but incomplete).
 - Delete `default_thesis_rules.md` once the YAML carries its reasoning too.
 
 **Exit criterion:** applied styles match the ruleset field-for-field at 100%

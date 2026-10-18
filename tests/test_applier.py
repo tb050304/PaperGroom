@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 from docx import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt
+from docx.oxml.ns import qn
+from docx.shared import Pt, RGBColor
 
 from papergroom.models import Document, Paragraph, Role
 from papergroom.rules import load_ruleset
@@ -179,6 +180,149 @@ def test_apply_is_idempotent(tmp_path: Path):
     apply_ruleset(model, None, docx_doc)
 
     assert docx_doc.paragraphs[0]._p.xml == once
+
+
+# ---------- Word built-in styles (--word-styles) ----------
+
+
+def test_word_styles_maps_headings_by_style_id(tmp_path: Path):
+    """IDs, not localized names — this must work on a Chinese Word install."""
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    model = Document(
+        source_path=str(path.resolve()),
+        paragraphs=[
+            Paragraph(
+                index=0,
+                text="1 研究背景",
+                role=Role.TITLE_L1,
+                resolved_style=ParagraphStyle(font_size_pt=16, bold=True),
+            ),
+            Paragraph(
+                index=1,
+                text="正文段落。",
+                role=Role.BODY,
+                resolved_style=ParagraphStyle(font_size_pt=12),
+            ),
+        ],
+    )
+
+    apply_ruleset(model, None, docx_doc, word_styles=True)
+
+    assert docx_doc.paragraphs[0].style.style_id == "Heading1"
+    assert docx_doc.paragraphs[1].style.style_id != "Heading1"
+
+
+def test_word_style_is_found_by_name_not_by_id(tmp_path: Path):
+    """Real documents do not always use Word's own style ids.
+
+    The sample thesis this project was developed against defines Normal as
+    "a" and Heading 1 as "1" — a converter, not Word, produced it. Looking up
+    "Heading1" would silently do nothing.
+    """
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    for style in docx_doc.styles.element.findall(qn("w:style")):
+        if style.get(qn("w:styleId")) == "Heading1":
+            style.set(qn("w:styleId"), "1")
+
+    model = Document(
+        source_path=str(path.resolve()),
+        paragraphs=[
+            Paragraph(
+                index=0,
+                text="1 研究背景",
+                role=Role.TITLE_L1,
+                resolved_style=ParagraphStyle(font_size_pt=16),
+            )
+        ],
+    )
+
+    apply_ruleset(model, None, docx_doc, word_styles=True)
+
+    assert docx_doc.paragraphs[0].style.style_id == "1"
+
+
+def test_without_word_styles_no_style_is_assigned(tmp_path: Path):
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    before = docx_doc.paragraphs[0].style.style_id
+    model = Document(
+        source_path=str(path.resolve()),
+        paragraphs=[
+            Paragraph(
+                index=0,
+                text="1 研究背景",
+                role=Role.TITLE_L1,
+                resolved_style=ParagraphStyle(font_size_pt=16),
+            )
+        ],
+    )
+
+    apply_ruleset(model, None, docx_doc)
+
+    assert docx_doc.paragraphs[0].style.style_id == before
+
+
+def test_word_styles_neutralise_the_theme_colour(tmp_path: Path):
+    """The default Heading 1 is blue; a thesis heading should not be."""
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    model = Document(
+        source_path=str(path.resolve()),
+        paragraphs=[
+            Paragraph(
+                index=0,
+                text="1 研究背景",
+                role=Role.TITLE_L1,
+                resolved_style=ParagraphStyle(font_size_pt=16, bold=True),
+            )
+        ],
+    )
+
+    apply_ruleset(model, None, docx_doc, word_styles=True)
+
+    assert docx_doc.paragraphs[0].runs[0].font.color.rgb == RGBColor(0, 0, 0)
+
+
+def test_word_styles_respect_an_explicit_colour(tmp_path: Path):
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    model = Document(
+        source_path=str(path.resolve()),
+        paragraphs=[
+            Paragraph(
+                index=0,
+                text="1 研究背景",
+                role=Role.TITLE_L1,
+                resolved_style=ParagraphStyle(font_size_pt=16, color_hex="FF0000"),
+            )
+        ],
+    )
+
+    apply_ruleset(model, None, docx_doc, word_styles=True)
+
+    assert docx_doc.paragraphs[0].runs[0].font.color.rgb == RGBColor(0xFF, 0, 0)
+
+
+def test_a_missing_word_style_is_not_invented(tmp_path: Path):
+    """Never reference a style the document does not define."""
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    for style in list(docx_doc.styles.element.findall(qn("w:style"))):
+        if style.get(qn("w:styleId")) == "Heading1":
+            docx_doc.styles.element.remove(style)
+    before = docx_doc.paragraphs[0].style.style_id
+
+    model = Document(
+        source_path=str(path.resolve()),
+        paragraphs=[
+            Paragraph(
+                index=0,
+                text="1 研究背景",
+                role=Role.TITLE_L1,
+                resolved_style=ParagraphStyle(font_size_pt=16),
+            )
+        ],
+    )
+
+    apply_ruleset(model, None, docx_doc, word_styles=True)
+
+    assert docx_doc.paragraphs[0].style.style_id == before
 
 
 def test_apply_east_asian_font_landed_on_run(tmp_path: Path):

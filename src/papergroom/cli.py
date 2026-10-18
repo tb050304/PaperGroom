@@ -55,6 +55,15 @@ def process(
             f"Defaults to the built-in '{DEFAULT_RULESET}'."
         ),
     ),
+    word_styles: bool = typer.Option(
+        False,
+        "--word-styles",
+        help=(
+            "Also map headings onto Word's built-in Heading styles, so the "
+            "navigation pane and an automatic table of contents work. "
+            "Off by default: direct formatting is more predictable."
+        ),
+    ),
     debug_annotation: bool = typer.Option(
         False,
         "--debug-annotation",
@@ -107,7 +116,7 @@ def process(
 
     # 6. Write.
     console.print(f"[bold]Writing[/bold] {output} ...")
-    out_path = write_document(doc, None, output)
+    out_path = write_document(doc, None, output, word_styles=word_styles)
 
     if debug_annotation:
         dump_path = out_path.with_suffix(".annotations.json")
