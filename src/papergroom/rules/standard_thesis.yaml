@@ -174,3 +174,11 @@ styles:
 
   # Explicitly empty: the applier leaves these paragraphs exactly as they are.
   unknown: {}
+
+# Three-line tables (三线表): a rule above, one under the header row, one
+# below, and nothing vertical. Set style to `keep` to leave borders alone, or
+# `none` to remove them.
+table_borders:
+  style: three_line
+  outer_width_pt: 1.5
+  header_width_pt: 0.75

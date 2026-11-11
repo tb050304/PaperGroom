@@ -19,7 +19,7 @@ from docx.shared import Pt, RGBColor
 from papergroom.models import Document, Paragraph, Role
 from papergroom.rules import load_ruleset
 from papergroom.rules.applier import apply_ruleset
-from papergroom.rules.schema import ParagraphStyle, Ruleset
+from papergroom.rules.schema import ParagraphStyle, Ruleset, TableBorders
 
 
 # ---------- schema / loader ----------
@@ -213,6 +213,72 @@ def test_table_cells_get_the_table_text_style(tmp_path: Path):
     assert docx_doc.tables[0].alignment == WD_TABLE_ALIGNMENT.CENTER
     cell_para = docx_doc.tables[0].cell(0, 0).paragraphs[0]
     assert cell_para.runs[0].font.size == Pt(10.5)
+
+
+def _table_docx(tmp_path: Path) -> tuple[Path, DocxDocument]:
+    doc = DocxDocument()
+    table = doc.add_table(rows=2, cols=2)
+    for r in range(2):
+        for c in range(2):
+            table.cell(r, c).text = f"r{r}c{c}"
+    path = tmp_path / "table.docx"
+    doc.save(str(path))
+    return path, DocxDocument(str(path))
+
+
+def _borders_by_edge(docx_doc: DocxDocument) -> dict:
+    element = docx_doc.tables[0]._tbl.tblPr.find(qn("w:tblBorders"))
+    assert element is not None
+    return {child.tag.split("}")[-1]: child for child in element}
+
+
+def test_three_line_table_borders(tmp_path: Path):
+    path, docx_doc = _table_docx(tmp_path)
+    ruleset = Ruleset(
+        name="t",
+        styles={},
+        table_borders=TableBorders(
+            style="three_line", outer_width_pt=1.5, header_width_pt=0.75
+        ),
+    )
+    model = Document(source_path=str(path.resolve()), paragraphs=[])
+
+    apply_ruleset(model, ruleset, docx_doc)
+
+    edges = _borders_by_edge(docx_doc)
+    assert edges["top"].get(qn("w:val")) == "single"
+    assert edges["top"].get(qn("w:sz")) == "12"  # 1.5pt in eighths
+    assert edges["bottom"].get(qn("w:sz")) == "12"
+    for edge in ("left", "right", "insideH", "insideV"):
+        assert edges[edge].get(qn("w:val")) == "nil"
+
+    # The rule under the header row lives on the cells, not the table.
+    header = docx_doc.tables[0].rows[0].cells[0]
+    tc_borders = header._tc.tcPr.find(qn("w:tcBorders"))
+    assert tc_borders is not None
+    assert tc_borders.find(qn("w:bottom")).get(qn("w:sz")) == "6"  # 0.75pt
+
+
+def test_no_borders_removes_them(tmp_path: Path):
+    path, docx_doc = _table_docx(tmp_path)
+    ruleset = Ruleset(name="t", styles={}, table_borders=TableBorders(style="none"))
+    model = Document(source_path=str(path.resolve()), paragraphs=[])
+
+    apply_ruleset(model, ruleset, docx_doc)
+
+    edges = _borders_by_edge(docx_doc)
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        assert edges[edge].get(qn("w:val")) == "nil"
+
+
+def test_keep_leaves_borders_alone(tmp_path: Path):
+    path, docx_doc = _table_docx(tmp_path)
+    ruleset = Ruleset(name="t", styles={}, table_borders=TableBorders(style="keep"))
+    model = Document(source_path=str(path.resolve()), paragraphs=[])
+
+    apply_ruleset(model, ruleset, docx_doc)
+
+    assert docx_doc.tables[0]._tbl.tblPr.find(qn("w:tblBorders")) is None
 
 
 def test_tables_are_untouched_without_table_styles(tmp_path: Path):

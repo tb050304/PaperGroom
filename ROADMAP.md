@@ -238,11 +238,15 @@ docx is deterministic.
   indent on line one.
 - The dead `defaults` key was removed from the schema: it was never
   implemented and invited confusion about where inheritance comes from.
-- **Table content.** Paragraphs inside table cells are not part of the document
-  model (python-docx and the parser both treat a table as an opaque block), so
-  they cannot carry a role. The applier styles them straight from the ruleset
-  instead: `table_text` for the cells, `table` for the block's alignment.
-  Verified end to end on a document with a table.
+- **Table content and borders.** Paragraphs inside table cells are not part of
+  the document model (python-docx and the parser both treat a table as an
+  opaque block), so they cannot carry a role. The applier styles them straight
+  from the ruleset: `table_text` for the cells, `table` for the block's
+  alignment, `table_borders` for the rules. `three_line` draws a 三线表 — a
+  rule above, one under the header row, one below, nothing vertical; `keep`
+  and `none` are the other choices, with `keep` the default so a ruleset that
+  says nothing changes nothing. Verified end to end, including XML element
+  order and a save/reopen round trip.
 - **`--word-styles` opt-in** maps headings onto Word's built-in Heading 1/2/3
   (and the document title onto Title), so the navigation pane and an automatic
   table of contents work. Styles are matched by normalized name in English and
@@ -254,8 +258,6 @@ docx is deterministic.
 **Remaining**
 
 - Delete `default_thesis_rules.md` once the YAML carries its reasoning too.
-- Table *borders* still come from the source document. Three-line tables
-  (三线表), the usual Chinese thesis requirement, are not applied.
 
 **Exit criterion:** applied styles match the ruleset field-for-field at 100%
 (asserted, not estimated), a custom ruleset that sets one property changes

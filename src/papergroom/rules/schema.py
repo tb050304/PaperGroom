@@ -21,9 +21,48 @@ Two consequences worth stating, because both are load-bearing:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..models import ParagraphStyle
+
+__all__ = [
+    "Ruleset",
+    "TableBorders",
+    "merge_rulesets",
+    "merge_styles",
+]
+
+
+class TableBorders(BaseModel):
+    """How table borders are drawn.
+
+    ``keep`` leaves the source document's borders alone (the default, so a
+    ruleset that says nothing here changes nothing). ``none`` removes them.
+    ``three_line`` draws a 三线表 — the usual Chinese thesis requirement: a
+    rule above the table, one below the header row, one below the table, and
+    nothing vertical.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    style: str = "keep"
+    outer_width_pt: float = 1.5
+    header_width_pt: float = 0.75
+
+    @field_validator("style")
+    @classmethod
+    def _known_style(cls, value: str) -> str:
+        allowed = {"keep", "none", "three_line"}
+        if value not in allowed:
+            raise ValueError(f"style must be one of {sorted(allowed)}, got {value!r}")
+        return value
+
+    @field_validator("outer_width_pt", "header_width_pt")
+    @classmethod
+    def _sane_width(cls, value: float) -> float:
+        if not 0 < value <= 20:
+            raise ValueError(f"border width must be between 0 and 20pt, got {value}")
+        return value
 
 
 class Ruleset(BaseModel):
@@ -44,6 +83,10 @@ class Ruleset(BaseModel):
     description: str | None = None
     extends: str | None = None
     styles: dict[str, ParagraphStyle] = Field(default_factory=dict)
+    # None means "inherit from whatever this ruleset extends"; an explicit
+    # value overrides it. Using None rather than a default keeps a custom
+    # ruleset from silently resetting the base's table borders to "keep".
+    table_borders: TableBorders | None = None
 
     def style_for(self, role_name: str) -> ParagraphStyle:
         """Return the style for a role, or an empty style if unlisted.
@@ -88,4 +131,12 @@ def merge_rulesets(base: Ruleset, overlay: Ruleset) -> Ruleset:
     styles = {role: style.model_copy() for role, style in base.styles.items()}
     for role, style in overlay.styles.items():
         styles[role] = merge_styles(styles.get(role), style)
-    return overlay.model_copy(update={"styles": styles, "extends": None})
+
+    table_borders = (
+        overlay.table_borders
+        if overlay.table_borders is not None
+        else base.table_borders
+    )
+    return overlay.model_copy(
+        update={"styles": styles, "extends": None, "table_borders": table_borders}
+    )

@@ -160,16 +160,97 @@ def _apply_table_styles(ruleset, docx_doc: DocxDocument) -> None:
     """
     text_style = ruleset.style_for(Role.TABLE_TEXT.value)
     block_style = ruleset.style_for(Role.TABLE.value)
+    borders = ruleset.table_borders
 
     for table in docx_doc.tables:
         if block_style.alignment in _TABLE_ALIGN:
             table.alignment = _TABLE_ALIGN[block_style.alignment]
+
+        if borders is not None and borders.style != "keep":
+            _set_table_borders(table, borders)
+
         if text_style.is_empty():
             continue
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
                     _apply_full(para, text_style)
+
+
+def _set_table_borders(table, config) -> None:
+    """Replace whatever borders the table has with the configured ones."""
+    tblPr = table._tbl.tblPr
+
+    # Clear table-level and cell-level borders first, so a table style that
+    # draws a full grid cannot leak verticals back in.
+    for old in tblPr.findall(qn("w:tblBorders")):
+        tblPr.remove(old)
+    for cell in table._cells:
+        tcPr = cell._tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn("w:tcBorders")):
+            tcPr.remove(old)
+
+    borders = OxmlElement("w:tblBorders")
+    if config.style == "three_line":
+        _add_border(borders, "top", config.outer_width_pt)
+        _add_border(borders, "bottom", config.outer_width_pt)
+        for edge in ("left", "right", "insideH", "insideV"):
+            _add_border(borders, edge, 0, nil=True)
+        _add_header_rule(table, config.header_width_pt)
+    else:  # "none"
+        for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            _add_border(borders, edge, 0, nil=True)
+
+    # tblBorders has a fixed place in the tblPr sequence.
+    tblPr.insert_element_before(
+        borders,
+        "w:shd",
+        "w:tblLayout",
+        "w:tblCellMar",
+        "w:tblLook",
+        "w:tblCaption",
+        "w:tblDescription",
+    )
+
+
+def _add_header_rule(table, width_pt: float) -> None:
+    """Draw the line under the header row, cell by cell.
+
+    A table-level border cannot do this: the rule has to stop between the
+    header and the body, so it belongs on each first-row cell.
+    """
+    if not table.rows:
+        return
+
+    for tc in table.rows[0]._tr.tc_lst:
+        tcPr = tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn("w:tcBorders")):
+            tcPr.remove(old)
+        tcBorders = OxmlElement("w:tcBorders")
+        _add_border(tcBorders, "bottom", width_pt)
+        tcPr.insert_element_before(
+            tcBorders,
+            "w:shd",
+            "w:noWrap",
+            "w:tcMar",
+            "w:textDirection",
+            "w:tcFitText",
+            "w:vAlign",
+            "w:hideMark",
+        )
+
+
+def _add_border(parent, edge: str, width_pt: float, *, nil: bool = False) -> None:
+    element = OxmlElement(f"w:{edge}")
+    if nil:
+        element.set(qn("w:val"), "nil")
+    else:
+        element.set(qn("w:val"), "single")
+        # w:sz is in eighths of a point: 1.5pt -> 12, 0.75pt -> 6.
+        element.set(qn("w:sz"), str(max(2, round(width_pt * 8))))
+        element.set(qn("w:space"), "0")
+        element.set(qn("w:color"), "000000")
+    parent.append(element)
 
 
 def _apply_paragraph_only(para, style: ParagraphStyle) -> None:

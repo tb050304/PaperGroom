@@ -16,7 +16,7 @@ import pytest
 
 from papergroom.models import ParagraphStyle
 from papergroom.rules.loader import load_ruleset
-from papergroom.rules.schema import Ruleset, merge_rulesets, merge_styles
+from papergroom.rules.schema import Ruleset, TableBorders, merge_rulesets, merge_styles
 from papergroom.rules.validate import validate_ruleset
 
 
@@ -190,6 +190,44 @@ def test_unknown_role_is_flagged():
 def test_missing_roles_are_reported():
     warnings = validate_ruleset(Ruleset(name="t", styles={"body": ParagraphStyle()}))
     assert any("no style for" in w and "title_l1" in w for w in warnings)
+
+
+def test_table_borders_are_inherited_from_the_base(tmp_path: Path):
+    path = _write(
+        tmp_path / "user.yaml",
+        """
+name: user
+extends: standard_thesis
+styles:
+  body:
+    font_size_pt: 14
+""",
+    )
+
+    ruleset = load_ruleset(str(path))
+
+    assert ruleset.table_borders is not None
+    assert ruleset.table_borders.style == "three_line"
+
+
+def test_table_borders_can_be_overridden(tmp_path: Path):
+    path = _write(
+        tmp_path / "user.yaml",
+        """
+name: user
+extends: standard_thesis
+table_borders:
+  style: keep
+styles: {}
+""",
+    )
+
+    assert load_ruleset(str(path)).table_borders.style == "keep"
+
+
+def test_an_unknown_table_border_style_is_rejected():
+    with pytest.raises(ValueError):
+        TableBorders(style="double")
 
 
 def test_reference_style_has_a_hanging_indent():
