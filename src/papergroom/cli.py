@@ -22,7 +22,7 @@ from .config import get_llm_config, get_processing_config
 from .labels import LabelsError, export_labels, load_labels
 from .parser import parse_document
 from .report import write_report
-from .rules.loader import load_ruleset
+from .rules.loader import list_rules, load_ruleset
 from .rules.resolve import resolve_styles
 from .rules.validate import validate_ruleset as check_ruleset
 from .structure import structurize
@@ -200,6 +200,23 @@ def process(
         console.print(f"  annotations dumped to {dump_path}")
 
     console.print(f"[green]Done.[/green] Output: {out_path}")
+
+
+@app.command("list-rules")
+def list_rules_command(
+    rules_dir: str = typer.Option(
+        None,
+        "--rules-dir",
+        help="Directory of additional .yaml rulesets to include.",
+    ),
+) -> None:
+    """List the rulesets available to --rules."""
+    names = list_rules(rules_dir)
+    if not names:
+        console.print("No rulesets found.")
+        return
+    for name in names:
+        console.print(name)
 
 
 @app.command("validate-rules")

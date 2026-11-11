@@ -143,6 +143,10 @@ papergroom process input.docx -o output.docx --debug-annotation
 
 # Check a ruleset without processing anything
 papergroom validate-rules my_school.yaml
+
+# List the rulesets available to --rules
+papergroom list-rules
+papergroom list-rules --rules-dir ./my-rules
 ```
 
 `--export-labels` writes a small JSON file with one entry per paragraph
