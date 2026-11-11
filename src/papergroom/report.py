@@ -31,6 +31,7 @@ _ROLE_GROUP: dict[str, str] = {
     Role.FIGURE.value: "media",
     Role.FIGURE_CAPTION.value: "media",
     Role.TABLE.value: "media",
+    Role.TABLE_TEXT.value: "media",
     Role.TABLE_CAPTION.value: "media",
     Role.REFERENCE.value: "reference",
     Role.LIST_ITEM.value: "body",

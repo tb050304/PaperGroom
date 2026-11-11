@@ -104,6 +104,19 @@ styles:
     space_before_pt: 0
     space_after_pt: 0
 
+  # Text inside table cells. The labeler never assigns this — cells are not
+  # paragraphs in the document model — so the applier applies it directly to
+  # every paragraph in every cell.
+  table_text:
+    font_name: Times New Roman
+    font_name_east_asian: 宋体
+    font_size_pt: 10.5
+    alignment: center
+    first_line_indent_chars: 0
+    line_spacing: 1.0
+    space_before_pt: 0
+    space_after_pt: 0
+
   table_caption:
     font_name: Times New Roman
     font_name_east_asian: 宋体

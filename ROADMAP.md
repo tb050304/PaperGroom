@@ -16,8 +16,8 @@ built-in ones.
   role; styles come from the ruleset through a deterministic resolver.
   Measured live at 95.5% (21/22) on DeepSeek `deepseek-chat`.
 - **Phase 3 — rules engine** — mostly landed: `extends` layering, schema
-  validation, `validate-rules`, `--word-styles`, and a true hanging indent for
-  references. Paragraphs inside real tables remain untouched.
+  validation, `validate-rules`, `--word-styles`, table content, and a true
+  hanging indent for references. Table borders are not restyled.
 - **Phase 4 — review loop** — the HTML report and the export / correct /
   re-import loop both land. A before/after diff does not.
 - **Phase 5** — not started.
@@ -233,6 +233,11 @@ docx is deterministic.
   indent on line one.
 - The dead `defaults` key was removed from the schema: it was never
   implemented and invited confusion about where inheritance comes from.
+- **Table content.** Paragraphs inside table cells are not part of the document
+  model (python-docx and the parser both treat a table as an opaque block), so
+  they cannot carry a role. The applier styles them straight from the ruleset
+  instead: `table_text` for the cells, `table` for the block's alignment.
+  Verified end to end on a document with a table.
 - **`--word-styles` opt-in** maps headings onto Word's built-in Heading 1/2/3
   (and the document title onto Title), so the navigation pane and an automatic
   table of contents work. Styles are matched by normalized name in English and
@@ -243,9 +248,9 @@ docx is deterministic.
 
 **Remaining**
 
-- Handle paragraphs inside real tables (they are currently skipped entirely,
-  which is safe but incomplete).
 - Delete `default_thesis_rules.md` once the YAML carries its reasoning too.
+- Table *borders* still come from the source document. Three-line tables
+  (三线表), the usual Chinese thesis requirement, are not applied.
 
 **Exit criterion:** applied styles match the ruleset field-for-field at 100%
 (asserted, not estimated), a custom ruleset that sets one property changes

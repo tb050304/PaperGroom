@@ -22,6 +22,10 @@ class Role(str, Enum):
     FIGURE = "figure"
     FIGURE_CAPTION = "figure_caption"
     TABLE = "table"
+    # Text inside table cells. Never emitted by the labeler — a table's cells
+    # are not separate paragraphs in the document model, so the applier styles
+    # them directly from the ruleset.
+    TABLE_TEXT = "table_text"
     TABLE_CAPTION = "table_caption"
     REFERENCE = "reference"
     ABSTRACT = "abstract"

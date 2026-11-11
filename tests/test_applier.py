@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from docx import Document as DocxDocument
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
@@ -18,7 +19,7 @@ from docx.shared import Pt, RGBColor
 from papergroom.models import Document, Paragraph, Role
 from papergroom.rules import load_ruleset
 from papergroom.rules.applier import apply_ruleset
-from papergroom.rules.schema import ParagraphStyle
+from papergroom.rules.schema import ParagraphStyle, Ruleset
 
 
 # ---------- schema / loader ----------
@@ -180,6 +181,53 @@ def test_apply_is_idempotent(tmp_path: Path):
     apply_ruleset(model, None, docx_doc)
 
     assert docx_doc.paragraphs[0]._p.xml == once
+
+
+# ---------- tables ----------
+
+
+def test_table_cells_get_the_table_text_style(tmp_path: Path):
+    doc = DocxDocument()
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "方法"
+    table.cell(0, 1).text = "结果"
+    path = tmp_path / "table.docx"
+    doc.save(str(path))
+    docx_doc = DocxDocument(str(path))
+
+    ruleset = Ruleset(
+        name="t",
+        styles={
+            "table": ParagraphStyle(alignment="center"),
+            "table_text": ParagraphStyle(
+                font_size_pt=10.5,
+                font_name_east_asian="宋体",
+                first_line_indent_chars=0,
+            ),
+        },
+    )
+    model = Document(source_path=str(path.resolve()), paragraphs=[])
+
+    apply_ruleset(model, ruleset, docx_doc)
+
+    assert docx_doc.tables[0].alignment == WD_TABLE_ALIGNMENT.CENTER
+    cell_para = docx_doc.tables[0].cell(0, 0).paragraphs[0]
+    assert cell_para.runs[0].font.size == Pt(10.5)
+
+
+def test_tables_are_untouched_without_table_styles(tmp_path: Path):
+    doc = DocxDocument()
+    table = doc.add_table(rows=1, cols=1)
+    table.cell(0, 0).text = "内容"
+    path = tmp_path / "table.docx"
+    doc.save(str(path))
+    docx_doc = DocxDocument(str(path))
+    before = docx_doc.tables[0].alignment
+
+    model = Document(source_path=str(path.resolve()), paragraphs=[])
+    apply_ruleset(model, Ruleset(name="t", styles={}), docx_doc)
+
+    assert docx_doc.tables[0].alignment == before
 
 
 # ---------- Word built-in styles (--word-styles) ----------

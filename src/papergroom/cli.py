@@ -156,7 +156,7 @@ def process(
 
     # 6. Write.
     console.print(f"[bold]Writing[/bold] {output} ...")
-    out_path = write_document(doc, None, output, word_styles=word_styles)
+    out_path = write_document(doc, ruleset, output, word_styles=word_styles)
 
     if report:
         report_path = write_report(

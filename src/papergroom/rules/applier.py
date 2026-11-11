@@ -11,6 +11,7 @@ All other properties keep the original document formatting.
 from __future__ import annotations
 
 from docx import Document as DocxDocument
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -93,6 +94,9 @@ def apply_ruleset(
 
         _apply_full(para_docx, style, force_black=force_black)
 
+    if ruleset is not None:
+        _apply_table_styles(ruleset, docx_doc)
+
 
 def _apply_word_style(para, role: Role, docx_doc: DocxDocument) -> bool:
     """Attach the document's built-in style for ``role``; True if applied.
@@ -142,6 +146,39 @@ def _apply_full(para, style: ParagraphStyle, *, force_black: bool = False) -> No
 
     for run in para.runs:
         _apply_run(run, style, force_black=force_black)
+
+
+_TABLE_ALIGN = {
+    "left": WD_TABLE_ALIGNMENT.LEFT,
+    "center": WD_TABLE_ALIGNMENT.CENTER,
+    "right": WD_TABLE_ALIGNMENT.RIGHT,
+}
+
+
+def _apply_table_styles(ruleset, docx_doc: DocxDocument) -> None:
+    """Style table content and position the tables.
+
+    Tables are not part of the paragraph list — python-docx's ``paragraphs``
+    and the parser both treat a table as an opaque block, and the index
+    mapping above deliberately ignores them. So cell text cannot carry a
+    role of its own and is styled straight from the ruleset instead:
+    ``table_text`` for the cells, ``table`` for the block's alignment.
+
+    Merged cells can appear more than once in ``row.cells``; applying the
+    same style twice is harmless, which is why idempotence is tested.
+    """
+    text_style = ruleset.style_for(Role.TABLE_TEXT.value)
+    block_style = ruleset.style_for(Role.TABLE.value)
+
+    for table in docx_doc.tables:
+        if block_style.alignment in _TABLE_ALIGN:
+            table.alignment = _TABLE_ALIGN[block_style.alignment]
+        if text_style.is_empty():
+            continue
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    _apply_full(para, text_style)
 
 
 def _apply_paragraph_only(para, style: ParagraphStyle) -> None:

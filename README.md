@@ -30,6 +30,10 @@ architecture. See [ROADMAP.md](ROADMAP.md) for the plan and the caveats.
    deterministically afterwards — reproducible, unit-testable, and about 90%
    cheaper per batch, since the long prose specification is no longer sent.
 
+Table content is styled too: paragraphs inside table cells get the
+`table_text` role from the ruleset, and the table's own alignment comes from
+`table`. Borders are left as they are.
+
 Be careful with the numbers in ROADMAP.md: the fixtures were written by the
 same hand as the rules, so they are a regression net rather than independent
 evidence.
