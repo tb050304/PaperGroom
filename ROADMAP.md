@@ -311,9 +311,13 @@ paper within 5 minutes.
   directory are skipped. Verified with two valid files and one corrupt one:
   the two succeeded, the corrupt one was reported, and the run exited non-zero.
 
+- **`--dry-run`.** Runs parse, structure recovery, labelling and style
+  resolution, then stops instead of writing the `.docx`. The review report and
+  label export still work, because inspecting the result is the point. Prints
+  how many paragraphs would be restyled.
+
 **Remaining**
 
-- `--dry-run`.
 - Documentation site and a release.
 
 ---

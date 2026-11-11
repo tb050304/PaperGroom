@@ -60,6 +60,7 @@ def _process_one(
     export_labels_path: Path | None,
     report: bool,
     debug_annotation: bool,
+    dry_run: bool = False,
     verbose: bool = True,
 ) -> Path:
     """Process one document. Returns the output path.
@@ -127,9 +128,19 @@ def _process_one(
     #    and ruleset always produce the same styles.
     resolve_styles(doc, ruleset)
 
-    # 6. Write.
-    _say(verbose, f"[bold]Writing[/bold] {output} ...")
-    out_path = write_document(doc, ruleset, output, word_styles=word_styles)
+    # 6. Write — unless this is a dry run, where the point is to inspect what
+    #    would happen without committing to it. The report and label export
+    #    still work, because they are how you inspect it.
+    if dry_run:
+        out_path = output.resolve()
+        _say(verbose, f"[yellow]Dry run:[/yellow] would write {out_path}")
+        styled = sum(
+            1 for p in doc.paragraphs if p.resolved_style and not p.resolved_style.is_empty()
+        )
+        _say(verbose, f"  {styled}/{len(doc.paragraphs)} paragraphs would be restyled.")
+    else:
+        _say(verbose, f"[bold]Writing[/bold] {output} ...")
+        out_path = write_document(doc, ruleset, output, word_styles=word_styles)
 
     if report:
         report_path = write_report(
@@ -172,7 +183,10 @@ def _process_one(
         )
         _say(verbose, f"  annotations dumped to {dump_path}")
 
-    _say(verbose, f"[green]Done.[/green] Output: {out_path}")
+    if dry_run:
+        _say(verbose, "[green]Done.[/green] Nothing written (dry run).")
+    else:
+        _say(verbose, f"[green]Done.[/green] Output: {out_path}")
     return out_path
 
 
@@ -229,6 +243,14 @@ def process(
         "--debug-annotation",
         help="Write a JSON dump of the roles and styles next to the output.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help=(
+            "Run the whole pipeline but do not write the .docx. Useful with "
+            "--report or --export-labels to inspect the result first."
+        ),
+    ),
 ) -> None:
     """Parse, recover structure, label roles, apply the ruleset, and export."""
     if output is None:
@@ -244,6 +266,7 @@ def process(
             export_labels_path=export_labels_path,
             report=report,
             debug_annotation=debug_annotation,
+            dry_run=dry_run,
         )
     except ProcessingError as e:
         console.print(f"[red]{e}[/red]")
@@ -270,6 +293,9 @@ def process_dir(
     word_styles: bool = typer.Option(False, "--word-styles"),
     report: bool = typer.Option(False, "--report"),
     debug_annotation: bool = typer.Option(False, "--debug-annotation"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Do not write the .docx files; reports still work."
+    ),
 ) -> None:
     """Process every .docx in a directory, continuing past failures.
 
@@ -310,6 +336,7 @@ def process_dir(
                 export_labels_path=None,
                 report=report,
                 debug_annotation=debug_annotation,
+                dry_run=dry_run,
                 verbose=False,
             )
             console.print(f"[green]ok[/green]   {source.name}")
@@ -317,8 +344,10 @@ def process_dir(
             failures.append((source, e))
             console.print(f"[red]fail[/red] {source.name}: {e}")
 
+    verb = "checked" if dry_run else "processed"
     console.print(
-        f"\n{len(files) - len(failures)}/{len(files)} processed. Output: {out_dir}"
+        f"\n{len(files) - len(failures)}/{len(files)} {verb}."
+        + ("" if dry_run else f" Output: {out_dir}")
     )
     if failures:
         raise typer.Exit(code=1)

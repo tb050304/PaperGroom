@@ -156,6 +156,9 @@ papergroom draft-rules "正文宋体小四，行距1.5，首行缩进2字符；�
 
 # Process every .docx in a directory; one failure does not stop the run
 papergroom process-dir papers/ -o papers/formatted --report
+
+# Run the whole pipeline but write no .docx — inspect the report first
+papergroom process input.docx --dry-run --report
 ```
 
 `draft-rules` only writes a starting point: the model can misread a
