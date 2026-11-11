@@ -117,6 +117,21 @@ def test_hint_is_shown_to_the_model(monkeypatch):
     assert doc.paragraphs[0].role == Role.TITLE_L2
 
 
+def test_a_word_heading_style_is_used_as_a_hint(monkeypatch):
+    """Auto-numbered headings carry no number in the text; the style does."""
+    doc = Document(
+        source_path="x.docx",
+        paragraphs=[Paragraph(index=0, text="研究背景", style_name="Heading 1")],
+    )
+    mock = _MockClient([_labels((0, "title_l1", 0.9))])
+    _install(monkeypatch, mock)
+
+    label_document(doc, _llm_config(), None, _processing())
+
+    assert "hint(title_l1)" in mock.calls[0]
+    assert doc.paragraphs[0].role == Role.TITLE_L1
+
+
 def test_batch_with_nothing_left_to_label_makes_no_call(monkeypatch):
     doc = _doc("参考文献：", "致谢")
     mock = _MockClient()

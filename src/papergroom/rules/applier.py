@@ -18,7 +18,14 @@ from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 from lxml import etree
 
-from ..models import Document, Paragraph, ParagraphStyle, Role
+from ..models import (
+    STYLE_NAME_ALIASES,
+    Document,
+    Paragraph,
+    ParagraphStyle,
+    Role,
+    normalise_style_name,
+)
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _ALIGN_MAP = {
@@ -28,20 +35,8 @@ _ALIGN_MAP = {
     "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
 }
 
-# Aliases for Word's built-in styles, used when ``--word-styles`` is on.
-#
-# Neither the name nor the id is portable on its own. The *name* is localized
-# ("Heading 1" / "标题 1"), and the *id* varies by who produced the document:
-# a file from a converter can call Normal "a" and Heading 1 "1", while Word's
-# own template uses "Normal" and "Heading1". So match on a space- and
-# case-insensitive form of the name, accepting both languages, then use
-# whatever id that document actually assigned.
-_WORD_STYLE_ALIASES: dict[Role, tuple[str, ...]] = {
-    Role.DOCUMENT_TITLE: ("title", "标题"),
-    Role.TITLE_L1: ("heading 1", "标题 1", "标题1"),
-    Role.TITLE_L2: ("heading 2", "标题 2", "标题2"),
-    Role.TITLE_L3: ("heading 3", "标题 3", "标题3"),
-}
+# The alias table lives in models.py: the labeler uses the same names as a
+# role prior, and two copies would drift.
 
 
 def apply_ruleset(
@@ -119,10 +114,10 @@ def _apply_word_style(para, role: Role, docx_doc: DocxDocument) -> bool:
 
 
 def _find_word_style_id(docx_doc: DocxDocument, role: Role) -> str | None:
-    aliases = _WORD_STYLE_ALIASES.get(role)
+    aliases = STYLE_NAME_ALIASES.get(role)
     if aliases is None:
         return None
-    wanted = {_normalise_style_name(alias) for alias in aliases}
+    wanted = {normalise_style_name(alias) for alias in aliases}
 
     for style in docx_doc.styles.element.findall(qn("w:style")):
         if style.get(qn("w:type")) != "paragraph":
@@ -131,13 +126,9 @@ def _find_word_style_id(docx_doc: DocxDocument, role: Role) -> str | None:
         if name_el is None:
             continue
         name = name_el.get(qn("w:val")) or ""
-        if _normalise_style_name(name) in wanted:
+        if normalise_style_name(name) in wanted:
             return style.get(qn("w:styleId"))
     return None
-
-
-def _normalise_style_name(name: str) -> str:
-    return name.strip().lower().replace(" ", "")
 
 
 def _apply_full(para, style: ParagraphStyle, *, force_black: bool = False) -> None:

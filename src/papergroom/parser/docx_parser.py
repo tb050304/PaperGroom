@@ -66,6 +66,7 @@ def parse_document(source_path: str | Path) -> Document:
                 index=idx,
                 text=text,
                 style_hint=style_hint,
+                style_name=para.style.name if para.style is not None else None,
                 has_image=has_image,
                 has_formula=has_formula,
                 has_hyperlink=has_hyperlink,

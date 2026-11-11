@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from papergroom.models import Document, Paragraph
+from papergroom.models import Document, Paragraph, Role
 from papergroom.structure import segment_text, structurize
 
 FIXTURES = Path(__file__).parent / "fixtures" / "segment_cases.yaml"
@@ -115,6 +115,37 @@ def test_structurize_leaves_unmerged_documents_alone():
 
     assert [p.text for p in doc.paragraphs] == texts
     assert doc.splits == {}
+
+
+def test_structurize_uses_the_style_name_as_a_hint():
+    """Auto-numbered headings have no number in the text; the style says it."""
+    doc = Document(
+        source_path="x.docx",
+        paragraphs=[Paragraph(index=0, text="研究背景", style_name="Heading 1", source_index=0)],
+    )
+
+    structurize(doc)
+
+    assert doc.paragraphs[0].role_hint == Role.TITLE_L1
+
+
+def test_a_split_paragraph_prefers_its_text_hint_over_the_style():
+    """A style that claimed one unit cannot be trusted once the paragraph split."""
+    doc = Document(
+        source_path="x.docx",
+        paragraphs=[
+            Paragraph(
+                index=0,
+                text="1 研究背景 当前高校课程论文格式规范问题很多。",
+                style_name="Heading 1",
+                source_index=0,
+            )
+        ],
+    )
+
+    structurize(doc)
+
+    assert [p.role_hint for p in doc.paragraphs] == [Role.TITLE_L1, None]
 
 
 def test_structurize_never_splits_paragraphs_with_objects():

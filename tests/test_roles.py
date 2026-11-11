@@ -20,7 +20,7 @@ import yaml
 from papergroom.ai import labeler
 from papergroom.ai.labeler import label_document
 from papergroom.config import LLMConfig, ProcessingConfig
-from papergroom.models import Document, Paragraph, Role
+from papergroom.models import Document, Paragraph, Role, role_from_style_name
 from papergroom.structure.patterns import certain_role, classify
 
 FIXTURES = Path(__file__).parent / "fixtures" / "role_cases.yaml"
@@ -69,6 +69,15 @@ def test_toc_entry_hints_unknown_not_a_heading():
     entry = "第2章 系统设计 ………………………………………………… 12"
     assert classify(entry) == Role.UNKNOWN
     assert certain_role(entry) is None
+
+
+def test_style_names_map_to_roles():
+    assert role_from_style_name("Heading 1") == Role.TITLE_L1
+    assert role_from_style_name("heading2") == Role.TITLE_L2
+    assert role_from_style_name("标题 3") == Role.TITLE_L3
+    assert role_from_style_name("Title") == Role.DOCUMENT_TITLE
+    assert role_from_style_name("Normal") is None
+    assert role_from_style_name(None) is None
 
 
 def test_a_numbered_heading_is_a_hint_not_a_verdict():

@@ -17,7 +17,7 @@ Public API::
 
 from __future__ import annotations
 
-from ..models import Document, Paragraph
+from ..models import Document, Paragraph, role_from_style_name
 from .segmenter import Segment, segment_text
 
 __all__ = ["structurize", "segment_text", "Segment"]
@@ -53,7 +53,13 @@ def structurize(doc: Document) -> Document:
                     update={
                         "index": len(out),
                         "source_index": source_index,
-                        "role_hint": segments[0].role_hint,
+                        # The paragraph's own style is the better prior for an
+                        # unsplit paragraph — most importantly for
+                        # auto-numbered headings. A paragraph that split
+                        # clearly held more than its style claimed, so there
+                        # the segment's own hint wins.
+                        "role_hint": role_from_style_name(para.style_name)
+                        or segments[0].role_hint,
                     }
                 )
             )
