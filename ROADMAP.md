@@ -20,7 +20,8 @@ built-in ones.
   hanging indent for references. Table borders are not restyled.
 - **Phase 4 — review loop** — the HTML report and the export / correct /
   re-import loop both land. A before/after diff does not.
-- **Phase 5** — not started.
+- **Phase 5 — usability** — `list-rules` and the natural-language rules
+  assistant land. `--dry-run`, batch processing and a release do not.
 
 ## Why the prototype isn't good enough
 
@@ -293,9 +294,22 @@ paper within 5 minutes.
 
 ### Phase 5 — Polish and usability
 
-- CLI: `list-rules`, `--dry-run`, batch directory processing
-- Rules assistant (natural language → YAML draft → user confirms)
-- Error handling, documentation, release
+**Built**
+
+- `list-rules` (with `--rules-dir`) — rulesets were undiscoverable from the
+  command line.
+- **Rules assistant.** `draft-rules "<requirements>" -o rules.yaml` asks the
+  model for a ruleset draft and writes it. The draft is schema-checked before
+  it is written, then loaded and validated as a resolved ruleset so inherited
+  roles are not reported as missing. It writes only a starting point — the
+  user reviews it, and from then on it is ordinary YAML applied
+  deterministically. Verified live: "正文宋体小四，行距1.5；一级标题黑体三号
+  居中；表格用三线表，文字五号宋体" produced exactly those three overrides.
+
+**Remaining**
+
+- `--dry-run` and batch directory processing.
+- Documentation site and a release.
 
 ---
 

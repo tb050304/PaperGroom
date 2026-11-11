@@ -150,7 +150,15 @@ papergroom validate-rules my_school.yaml
 # List the rulesets available to --rules
 papergroom list-rules
 papergroom list-rules --rules-dir ./my-rules
+
+# Describe your school's requirements; get a ruleset draft to review
+papergroom draft-rules "正文宋体小四，行距1.5，首行缩进2字符；一级标题黑体三号居中" -o my_school.yaml
 ```
+
+`draft-rules` only writes a starting point: the model can misread a
+requirement, so the file is schema-checked before it is written and you are
+expected to review it. Once it exists it is ordinary YAML — the application
+stays deterministic.
 
 `--export-labels` writes a small JSON file with one entry per paragraph
 (`index`, `role`, `text`). Edit a `role`, pass the file back with `--labels`,

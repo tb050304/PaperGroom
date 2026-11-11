@@ -42,6 +42,28 @@ def load_ruleset(path_or_name: str, rules_dir: str | None = None) -> Ruleset:
     return _load_file(_resolve_ref(path_or_name, rules_dir, base_dir=None), rules_dir, ())
 
 
+def parse_ruleset_text(text: str) -> Ruleset:
+    """Validate ruleset YAML without writing it to disk.
+
+    Used by the rules assistant, where the YAML arrives from a model and must
+    be checked before anyone is invited to save it. ``extends`` is not
+    resolved here — that needs a file location.
+
+    Raises:
+        ValueError: on invalid YAML or a schema violation.
+    """
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML: {e}") from e
+    if not isinstance(raw, dict):
+        raise ValueError("Ruleset must be a YAML mapping at the top level")
+    try:
+        return Ruleset.model_validate(raw)
+    except ValidationError as e:
+        raise ValueError(f"Ruleset failed validation: {e}") from e
+
+
 def list_rules(rules_dir: str | None = None) -> list[str]:
     """Return the names of available rulesets.
 

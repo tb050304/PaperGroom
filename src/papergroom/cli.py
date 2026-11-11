@@ -18,6 +18,7 @@ import typer
 from rich.console import Console
 
 from .ai import label_document
+from .ai.rules_draft import draft_rules, validate_draft
 from .config import get_llm_config, get_processing_config
 from .labels import LabelsError, export_labels, load_labels
 from .parser import parse_document
@@ -200,6 +201,57 @@ def process(
         console.print(f"  annotations dumped to {dump_path}")
 
     console.print(f"[green]Done.[/green] Output: {out_path}")
+
+
+@app.command("draft-rules")
+def draft_rules_command(
+    description: str = typer.Argument(
+        ..., help="Formatting requirements, in natural language."
+    ),
+    output: Path = typer.Option(
+        ..., "-o", "--output", help="Where to write the YAML draft."
+    ),
+    base: str = typer.Option(
+        "standard_thesis", "--base", help="Ruleset the draft should extend."
+    ),
+) -> None:
+    """Draft a ruleset YAML from a description. Review it before using it."""
+    llm_config = get_llm_config()
+    console.print(f"[bold]Drafting[/bold] a ruleset extending {base} ...")
+
+    try:
+        text = draft_rules(description, llm_config, base)
+    except Exception as e:  # network or provider error
+        console.print(f"[red]Draft failed:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    try:
+        validate_draft(text)  # schema only; extends is resolved below
+    except ValueError as e:
+        console.print("[red]The model returned an invalid ruleset:[/red]")
+        console.print(text)
+        console.print(f"\n{e}")
+        raise typer.Exit(code=1) from e
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text, encoding="utf-8")
+    console.print(f"Wrote [bold]{output}[/bold]")
+
+    # Warn on the *resolved* ruleset: the draft only lists overrides, so
+    # checking it directly would claim every inherited role is missing.
+    try:
+        resolved = load_ruleset(str(output))
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]Written, but the draft does not load:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+    for warning in check_ruleset(resolved):
+        console.print(f"[yellow]warning:[/yellow] {warning}")
+
+    console.print(
+        "[yellow]This is a draft.[/yellow] Review it, then run "
+        f"`papergroom validate-rules {output}`."
+    )
 
 
 @app.command("list-rules")
