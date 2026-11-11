@@ -153,6 +153,9 @@ papergroom list-rules --rules-dir ./my-rules
 
 # Describe your school's requirements; get a ruleset draft to review
 papergroom draft-rules "正文宋体小四，行距1.5，首行缩进2字符；一级标题黑体三号居中" -o my_school.yaml
+
+# Process every .docx in a directory; one failure does not stop the run
+papergroom process-dir papers/ -o papers/formatted --report
 ```
 
 `draft-rules` only writes a starting point: the model can misread a

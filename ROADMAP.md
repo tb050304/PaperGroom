@@ -20,8 +20,8 @@ built-in ones.
   hanging indent for references. Table borders are not restyled.
 - **Phase 4 — review loop** — the HTML report and the export / correct /
   re-import loop both land. A before/after diff does not.
-- **Phase 5 — usability** — `list-rules` and the natural-language rules
-  assistant land. `--dry-run`, batch processing and a release do not.
+- **Phase 5 — usability** — `list-rules`, the rules assistant and batch
+  processing land. `--dry-run` and a release do not.
 
 ## Why the prototype isn't good enough
 
@@ -305,10 +305,15 @@ paper within 5 minutes.
   user reviews it, and from then on it is ordinary YAML applied
   deterministically. Verified live: "正文宋体小四，行距1.5；一级标题黑体三号
   居中；表格用三线表，文字五号宋体" produced exactly those three overrides.
+- **Batch processing.** `process-dir` handles a directory (optionally
+  recursive), writes into a separate output tree, and continues past a broken
+  file rather than aborting the run. Word's `~$` lock files and the output
+  directory are skipped. Verified with two valid files and one corrupt one:
+  the two succeeded, the corrupt one was reported, and the run exited non-zero.
 
 **Remaining**
 
-- `--dry-run` and batch directory processing.
+- `--dry-run`.
 - Documentation site and a release.
 
 ---

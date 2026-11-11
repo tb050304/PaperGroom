@@ -1,6 +1,6 @@
-"""Command-line entry: `papergroom process`.
+"""Command-line entry.
 
-Wires the layers together:
+The pipeline, wired together:
 
     parse → recover structure → label roles (AI) → resolve styles (ruleset) → write
 
@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 
 import typer
+from docx.opc.exceptions import PackageNotFoundError
 from rich.console import Console
 
 from .ai import label_document
@@ -38,6 +39,141 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+
+class ProcessingError(RuntimeError):
+    """A document could not be processed; the message is fit for the user."""
+
+
+def _say(verbose: bool, message: str) -> None:
+    if verbose:
+        console.print(message)
+
+
+def _process_one(
+    input: Path,
+    output: Path,
+    *,
+    rules: str | None,
+    word_styles: bool,
+    labels: Path | None,
+    export_labels_path: Path | None,
+    report: bool,
+    debug_annotation: bool,
+    verbose: bool = True,
+) -> Path:
+    """Process one document. Returns the output path.
+
+    Raises :class:`ProcessingError` for anything the user can act on, so a
+    batch run can report the file and keep going.
+    """
+    # 1. Parse.
+    _say(verbose, f"[bold]Parsing[/bold] {input} ...")
+    try:
+        doc = parse_document(input)
+    except (OSError, ValueError, PackageNotFoundError) as e:
+        raise ProcessingError(f"cannot read {input}: {e}") from e
+    _say(verbose, f"  {len(doc.paragraphs)} paragraphs parsed.")
+
+    # 2. Recover structure. Documents drafted by an LLM and pasted into Word
+    #    often carry a heading and its body — or several references — in a
+    #    single paragraph. Split those before anything tries to style them.
+    before = len(doc.paragraphs)
+    structurize(doc)
+    recovered = len(doc.paragraphs) - before
+    if recovered:
+        _say(
+            verbose,
+            f"[bold]Structure[/bold] {recovered} paragraph(s) recovered from merged text.",
+        )
+    else:
+        _say(verbose, "[bold]Structure[/bold] no merged paragraphs found.")
+
+    # 3. Load the ruleset that will decide every style.
+    try:
+        ruleset = load_ruleset(rules or DEFAULT_RULESET)
+    except (FileNotFoundError, ValueError) as e:
+        raise ProcessingError(f"cannot load ruleset: {e}") from e
+    _say(verbose, f"[bold]Ruleset:[/bold] {ruleset.name}")
+
+    # 3b. Human corrections, if any. Loaded after structure recovery because
+    #     the indices refer to the recovered paragraphs.
+    overrides = None
+    if labels is not None:
+        try:
+            overrides = load_labels(labels, doc)
+        except LabelsError as e:
+            raise ProcessingError(f"cannot use labels: {e}") from e
+        _say(verbose, f"[bold]Labels:[/bold] {len(overrides)} override(s) from {labels}")
+
+    # 4. Label roles. The model decides what each paragraph is, and nothing
+    #    about how it looks.
+    _say(verbose, "[bold]Labeling[/bold] roles with AI ...")
+    try:
+        llm_config = get_llm_config()
+    except ValueError as e:
+        raise ProcessingError(str(e)) from e
+    processing = get_processing_config(debug_annotation=debug_annotation)
+    label_document(doc, llm_config, ruleset, processing, overrides=overrides)
+
+    if export_labels_path is not None:
+        written = export_labels(doc, export_labels_path)
+        _say(verbose, f"  labels exported to {written}")
+
+    labeled = sum(1 for p in doc.paragraphs if p.role.value != "unknown")
+    _say(verbose, f"  {labeled}/{len(doc.paragraphs)} paragraphs labeled.")
+
+    # 5. Resolve styles from the ruleset. Deterministic: the same document
+    #    and ruleset always produce the same styles.
+    resolve_styles(doc, ruleset)
+
+    # 6. Write.
+    _say(verbose, f"[bold]Writing[/bold] {output} ...")
+    out_path = write_document(doc, ruleset, output, word_styles=word_styles)
+
+    if report:
+        report_path = write_report(
+            doc,
+            ruleset,
+            out_path.with_suffix(".report.html"),
+            output_name=out_path.name,
+            min_confidence=processing.min_confidence,
+        )
+        _say(verbose, f"  review report: {report_path}")
+
+    if debug_annotation:
+        dump_path = out_path.with_suffix(".annotations.json")
+        dump_path.write_text(
+            json.dumps(
+                {
+                    "source": doc.source_path,
+                    "ruleset": ruleset.name,
+                    "paragraphs": [
+                        {
+                            "index": p.index,
+                            "source_index": p.source_index,
+                            "role": p.role.value,
+                            "role_hint": p.role_hint.value if p.role_hint else None,
+                            "confidence": p.confidence,
+                            "text_preview": p.text[:80],
+                            "style": (
+                                p.resolved_style.model_dump(exclude_none=True)
+                                if p.resolved_style
+                                else None
+                            ),
+                        }
+                        for p in doc.paragraphs
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        _say(verbose, f"  annotations dumped to {dump_path}")
+
+    _say(verbose, f"[green]Done.[/green] Output: {out_path}")
+    return out_path
 
 
 @app.command()
@@ -98,109 +234,94 @@ def process(
     if output is None:
         output = input.parent / f"{input.stem}_formatted.docx"
 
-    # 1. Parse.
-    console.print(f"[bold]Parsing[/bold] {input} ...")
-    doc = parse_document(input)
-    console.print(f"  {len(doc.paragraphs)} paragraphs parsed.")
-
-    # 2. Recover structure. Documents drafted by an LLM and pasted into Word
-    #    often carry a heading and its body — or several references — in a
-    #    single paragraph. Split those before anything tries to style them.
-    before = len(doc.paragraphs)
-    structurize(doc)
-    recovered = len(doc.paragraphs) - before
-    if recovered:
-        console.print(
-            f"[bold]Structure[/bold] {recovered} paragraph(s) recovered from merged text."
-        )
-    else:
-        console.print("[bold]Structure[/bold] no merged paragraphs found.")
-
-    # 3. Load the ruleset that will decide every style.
     try:
-        ruleset = load_ruleset(rules or DEFAULT_RULESET)
-    except (FileNotFoundError, ValueError) as e:
-        console.print(f"[red]Cannot load ruleset:[/red] {e}")
+        _process_one(
+            input,
+            output,
+            rules=rules,
+            word_styles=word_styles,
+            labels=labels,
+            export_labels_path=export_labels_path,
+            report=report,
+            debug_annotation=debug_annotation,
+        )
+    except ProcessingError as e:
+        console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1) from e
-    console.print(f"[bold]Ruleset:[/bold] {ruleset.name}")
 
-    # 3b. Human corrections, if any. Loaded after structure recovery because
-    #     the indices refer to the recovered paragraphs.
-    overrides = None
-    if labels is not None:
+
+@app.command("process-dir")
+def process_dir(
+    directory: Path = typer.Argument(
+        ..., exists=True, file_okay=False, help="Directory of .docx files."
+    ),
+    output_dir: Path = typer.Option(
+        None,
+        "-o",
+        "--output-dir",
+        help="Where to write results. Defaults to <directory>/formatted.",
+    ),
+    rules: str = typer.Option(
+        None, "-r", "--rules", help="Ruleset path or built-in name."
+    ),
+    recursive: bool = typer.Option(
+        False, "--recursive", help="Include subdirectories."
+    ),
+    word_styles: bool = typer.Option(False, "--word-styles"),
+    report: bool = typer.Option(False, "--report"),
+    debug_annotation: bool = typer.Option(False, "--debug-annotation"),
+) -> None:
+    """Process every .docx in a directory, continuing past failures.
+
+    Per-document labels and label export are not available here: their
+    indices refer to one document.
+    """
+    out_dir = output_dir or directory / "formatted"
+    if out_dir.resolve() == directory.resolve():
+        console.print("[red]Output directory must differ from the input directory.[/red]")
+        raise typer.Exit(code=1)
+
+    candidates = directory.rglob("*.docx") if recursive else directory.glob("*.docx")
+    files = sorted(
+        f
+        for f in candidates
+        # Word leaves ~$ lock files next to open documents.
+        if not f.name.startswith("~$")
+        and out_dir.resolve() not in f.resolve().parents
+    )
+    if not files:
+        console.print("No .docx files found.")
+        raise typer.Exit(code=1)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    failures: list[tuple[Path, Exception]] = []
+
+    for source in files:
+        target = (
+            out_dir / source.relative_to(directory) if recursive else out_dir / source.name
+        )
         try:
-            overrides = load_labels(labels, doc)
-        except LabelsError as e:
-            console.print(f"[red]Cannot use labels:[/red] {e}")
-            raise typer.Exit(code=1) from e
-        console.print(
-            f"[bold]Labels:[/bold] {len(overrides)} override(s) from {labels}"
-        )
+            _process_one(
+                source,
+                target,
+                rules=rules,
+                word_styles=word_styles,
+                labels=None,
+                export_labels_path=None,
+                report=report,
+                debug_annotation=debug_annotation,
+                verbose=False,
+            )
+            console.print(f"[green]ok[/green]   {source.name}")
+        except Exception as e:  # keep going: one bad file must not stop the run
+            failures.append((source, e))
+            console.print(f"[red]fail[/red] {source.name}: {e}")
 
-    # 4. Label roles. The model decides what each paragraph is, and nothing
-    #    about how it looks.
-    console.print("[bold]Labeling[/bold] roles with AI ...")
-    llm_config = get_llm_config()
-    processing = get_processing_config(debug_annotation=debug_annotation)
-    label_document(doc, llm_config, ruleset, processing, overrides=overrides)
-
-    if export_labels_path is not None:
-        written = export_labels(doc, export_labels_path)
-        console.print(f"  labels exported to {written}")
-
-    labeled = sum(1 for p in doc.paragraphs if p.role.value != "unknown")
-    console.print(f"  {labeled}/{len(doc.paragraphs)} paragraphs labeled.")
-
-    # 5. Resolve styles from the ruleset. Deterministic: the same document
-    #    and ruleset always produce the same styles.
-    resolve_styles(doc, ruleset)
-
-    # 6. Write.
-    console.print(f"[bold]Writing[/bold] {output} ...")
-    out_path = write_document(doc, ruleset, output, word_styles=word_styles)
-
-    if report:
-        report_path = write_report(
-            doc,
-            ruleset,
-            out_path.with_suffix(".report.html"),
-            output_name=out_path.name,
-            min_confidence=processing.min_confidence,
-        )
-        console.print(f"  review report: {report_path}")
-
-    if debug_annotation:
-        dump_path = out_path.with_suffix(".annotations.json")
-        dump_path.write_text(
-            json.dumps(
-                {
-                    "source": doc.source_path,
-                    "ruleset": ruleset.name,
-                    "paragraphs": [
-                        {
-                            "index": p.index,
-                            "source_index": p.source_index,
-                            "role": p.role.value,
-                            "role_hint": p.role_hint.value if p.role_hint else None,
-                            "confidence": p.confidence,
-                            "text_preview": p.text[:80],
-                            "style": (
-                                p.resolved_style.model_dump(exclude_none=True)
-                                if p.resolved_style
-                                else None
-                            ),
-                        }
-                        for p in doc.paragraphs
-                    ],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        console.print(f"  annotations dumped to {dump_path}")
-
-    console.print(f"[green]Done.[/green] Output: {out_path}")
+    console.print(
+        f"\n{len(files) - len(failures)}/{len(files)} processed. Output: {out_dir}"
+    )
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @app.command("draft-rules")
