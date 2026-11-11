@@ -20,6 +20,7 @@ from rich.console import Console
 from .ai import label_document
 from .config import get_llm_config, get_processing_config
 from .parser import parse_document
+from .report import write_report
 from .rules.loader import load_ruleset
 from .rules.resolve import resolve_styles
 from .rules.validate import validate_ruleset as check_ruleset
@@ -62,6 +63,14 @@ def process(
             "Also map headings onto Word's built-in Heading styles, so the "
             "navigation pane and an automatic table of contents work. "
             "Off by default: direct formatting is more predictable."
+        ),
+    ),
+    report: bool = typer.Option(
+        False,
+        "--report",
+        help=(
+            "Write an HTML review report next to the output: every paragraph's "
+            "role, confidence and applied style, with uncertain ones highlighted."
         ),
     ),
     debug_annotation: bool = typer.Option(
@@ -117,6 +126,16 @@ def process(
     # 6. Write.
     console.print(f"[bold]Writing[/bold] {output} ...")
     out_path = write_document(doc, None, output, word_styles=word_styles)
+
+    if report:
+        report_path = write_report(
+            doc,
+            ruleset,
+            out_path.with_suffix(".report.html"),
+            output_name=out_path.name,
+            min_confidence=processing.min_confidence,
+        )
+        console.print(f"  review report: {report_path}")
 
     if debug_annotation:
         dump_path = out_path.with_suffix(".annotations.json")

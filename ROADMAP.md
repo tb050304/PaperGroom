@@ -16,9 +16,11 @@ built-in ones.
   role; styles come from the ruleset through a deterministic resolver.
   Measured live at 95.5% (21/22) on DeepSeek `deepseek-chat`.
 - **Phase 3 — rules engine** — mostly landed: `extends` layering, schema
-  validation, `validate-rules`, and a true hanging indent for references.
-  Applier hardening and `--word-styles` remain.
-- **Phase 4 onward** — not started.
+  validation, `validate-rules`, `--word-styles`, and a true hanging indent for
+  references. Paragraphs inside real tables remain untouched.
+- **Phase 4 — review loop** — the HTML report lands; feeding a human
+  correction back into a re-run does not.
+- **Phase 5** — not started.
 
 ## Why the prototype isn't good enough
 
@@ -252,11 +254,27 @@ second time.
 
 ### Phase 4 — Review loop
 
-- HTML report: role highlighting, confidence, before/after diff
-- Export labels → correct by hand → re-run only the affected parts
+**Built**
 
-**Done when:** a person can find and fix every misclassification in one paper
-within 5 minutes.
+- **`--report`** writes a self-contained HTML file beside the output: summary
+  counts, then every paragraph with its role, confidence and applied style,
+  colour-coded by role family. Anything unknown or below the confidence
+  threshold is highlighted. No external assets — it opens anywhere and can be
+  attached to a bug report.
+- On the sample thesis it shows all 17 non-empty paragraphs labelled with
+  nothing flagged for review.
+
+**Remaining**
+
+- **Correction loop.** The report shows what happened but cannot feed a fix
+  back. Next: emit the labels in an editable file, accept it as input, and
+  re-run only the affected paragraphs.
+- **Before/after diff.** The report shows what was applied, not what the
+  paragraph looked like before. A meaningful diff needs run-level original
+  formatting captured at parse time.
+
+**Exit criterion:** a person can find and fix every misclassification in one
+paper within 5 minutes.
 
 ### Phase 5 — Polish and usability
 

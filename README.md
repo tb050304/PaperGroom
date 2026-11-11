@@ -122,6 +122,10 @@ papergroom process input.docx -r my_school.yaml -o output.docx
 # an automatic table of contents work
 papergroom process input.docx -o output.docx --word-styles
 
+# Write an HTML review report next to the output: every paragraph's role,
+# confidence and applied style, with uncertain ones highlighted
+papergroom process input.docx -o output.docx --report
+
 # Also dump the role and style decided for each paragraph
 papergroom process input.docx -o output.docx --debug-annotation
 
