@@ -26,11 +26,63 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ..models import ParagraphStyle
 
 __all__ = [
+    "PAGE_SIZES_CM",
+    "PageSetup",
     "Ruleset",
     "TableBorders",
     "merge_rulesets",
     "merge_styles",
 ]
+
+
+# Paper sizes in centimetres. ``size`` is a convenience; explicit width/height
+# override it.
+PAGE_SIZES_CM: dict[str, tuple[float, float]] = {
+    "a4": (21.0, 29.7),
+    "a3": (29.7, 42.0),
+    "letter": (21.59, 27.94),
+    "legal": (21.59, 35.56),
+}
+
+
+class PageSetup(BaseModel):
+    """Paper size and margins, in centimetres.
+
+    Every field is optional and a field left None is not changed. ``size``
+    sets width and height; explicit ``width_cm`` / ``height_cm`` win over it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    size: str | None = None
+    width_cm: float | None = None
+    height_cm: float | None = None
+    top_cm: float | None = None
+    bottom_cm: float | None = None
+    left_cm: float | None = None
+    right_cm: float | None = None
+    gutter_cm: float | None = None
+
+    @field_validator("size")
+    @classmethod
+    def _known_size(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalised = value.strip().lower()
+        if normalised not in PAGE_SIZES_CM:
+            raise ValueError(
+                f"size must be one of {sorted(PAGE_SIZES_CM)}, got {value!r}"
+            )
+        return normalised
+
+    @field_validator(
+        "width_cm", "height_cm", "top_cm", "bottom_cm", "left_cm", "right_cm", "gutter_cm"
+    )
+    @classmethod
+    def _sane_length(cls, value: float | None) -> float | None:
+        if value is not None and not 0 <= value <= 60:
+            raise ValueError(f"page length must be between 0 and 60cm, got {value}")
+        return value
 
 
 class TableBorders(BaseModel):
@@ -87,6 +139,9 @@ class Ruleset(BaseModel):
     # value overrides it. Using None rather than a default keeps a custom
     # ruleset from silently resetting the base's table borders to "keep".
     table_borders: TableBorders | None = None
+    # Same inheritance rule as table_borders: None means "inherit", so a
+    # custom ruleset does not silently reset the page setup.
+    page: PageSetup | None = None
 
     def style_for(self, role_name: str) -> ParagraphStyle:
         """Return the style for a role, or an empty style if unlisted.
@@ -137,6 +192,12 @@ def merge_rulesets(base: Ruleset, overlay: Ruleset) -> Ruleset:
         if overlay.table_borders is not None
         else base.table_borders
     )
+    page = overlay.page if overlay.page is not None else base.page
     return overlay.model_copy(
-        update={"styles": styles, "extends": None, "table_borders": table_borders}
+        update={
+            "styles": styles,
+            "extends": None,
+            "table_borders": table_borders,
+            "page": page,
+        }
     )

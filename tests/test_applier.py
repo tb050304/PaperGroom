@@ -14,12 +14,12 @@ from docx import Document as DocxDocument
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Cm, Pt, RGBColor
 
 from papergroom.models import Document, Paragraph, Role
 from papergroom.rules import load_ruleset
 from papergroom.rules.applier import apply_ruleset
-from papergroom.rules.schema import ParagraphStyle, Ruleset, TableBorders
+from papergroom.rules.schema import PageSetup, ParagraphStyle, Ruleset, TableBorders
 
 
 # ---------- schema / loader ----------
@@ -181,6 +181,46 @@ def test_apply_is_idempotent(tmp_path: Path):
     apply_ruleset(model, None, docx_doc)
 
     assert docx_doc.paragraphs[0]._p.xml == once
+
+
+# ---------- page setup ----------
+
+
+def test_page_setup_sets_size_and_margins(tmp_path: Path):
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    before_right = docx_doc.sections[0].right_margin
+
+    ruleset = Ruleset(
+        name="t",
+        styles={},
+        page=PageSetup(size="a4", top_cm=2.5, left_cm=3.0),
+    )
+    model = Document(source_path=str(path.resolve()), paragraphs=[])
+
+    apply_ruleset(model, ruleset, docx_doc)
+
+    section = docx_doc.sections[0]
+    # Word stores page geometry in twips, so a centimetre round-trips with a
+    # fraction of a point of error. Compare in cm rather than EMU.
+    assert section.page_width.cm == pytest.approx(21.0, abs=0.01)
+    assert section.page_height.cm == pytest.approx(29.7, abs=0.01)
+    assert section.top_margin.cm == pytest.approx(2.5, abs=0.01)
+    assert section.left_margin.cm == pytest.approx(3.0, abs=0.01)
+    # Unmentioned fields stay as they were.
+    assert section.right_margin == before_right
+
+
+def test_a_ruleset_without_page_setup_leaves_the_page_alone(tmp_path: Path):
+    path, docx_doc = _build_docx_with_body(tmp_path)
+    before = docx_doc.sections[0].page_width
+
+    apply_ruleset(
+        Document(source_path=str(path.resolve()), paragraphs=[]),
+        Ruleset(name="t", styles={}),
+        docx_doc,
+    )
+
+    assert docx_doc.sections[0].page_width == before
 
 
 # ---------- tables ----------

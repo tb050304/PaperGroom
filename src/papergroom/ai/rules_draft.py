@@ -64,11 +64,18 @@ REQUIREMENTS
    alone". Never invent values the user did not ask for.
 6. Convert Chinese type sizes: 初号42, 小初36, 一号26, 小一24, 二号22, 小二18,
    三号16, 小三15, 四号14, 小四12, 五号10.5, 小五9.
-7. Table borders are a top-level key, not a role:
+7. Table borders and page setup are top-level keys, not roles. Include them
+   only if the user mentions them:
      table_borders:
        style: three_line      # keep | none | three_line
        outer_width_pt: 1.5
        header_width_pt: 0.75
+     page:
+       size: A4               # a4 | a3 | letter | legal
+       top_cm: 2.5
+       bottom_cm: 2.5
+       left_cm: 3.0
+       right_cm: 2.0
 8. Output strict YAML only. No prose, no markdown fences.
 
 WHAT THE BASE RULESET CURRENTLY DOES (reference only; do not repeat it)

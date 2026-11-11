@@ -16,7 +16,13 @@ import pytest
 
 from papergroom.models import ParagraphStyle
 from papergroom.rules.loader import load_ruleset
-from papergroom.rules.schema import Ruleset, TableBorders, merge_rulesets, merge_styles
+from papergroom.rules.schema import (
+    PageSetup,
+    Ruleset,
+    TableBorders,
+    merge_rulesets,
+    merge_styles,
+)
 from papergroom.rules.validate import validate_ruleset
 
 
@@ -228,6 +234,50 @@ styles: {}
 def test_an_unknown_table_border_style_is_rejected():
     with pytest.raises(ValueError):
         TableBorders(style="double")
+
+
+def test_page_setup_is_inherited_from_the_base(tmp_path: Path):
+    path = _write(
+        tmp_path / "user.yaml",
+        """
+name: user
+extends: standard_thesis
+styles:
+  body:
+    font_size_pt: 14
+""",
+    )
+
+    page = load_ruleset(str(path)).page
+
+    assert page is not None
+    assert page.size == "a4"
+    assert page.left_cm == 3.0
+
+
+def test_page_setup_can_be_overridden(tmp_path: Path):
+    path = _write(
+        tmp_path / "user.yaml",
+        """
+name: user
+extends: standard_thesis
+page:
+  size: letter
+styles: {}
+""",
+    )
+
+    assert load_ruleset(str(path)).page.size == "letter"
+
+
+def test_an_unknown_paper_size_is_rejected():
+    with pytest.raises(ValueError, match="size must be one of"):
+        PageSetup(size="B5")
+
+
+def test_negative_margins_are_rejected():
+    with pytest.raises(ValueError):
+        PageSetup(top_cm=-1)
 
 
 def test_reference_style_has_a_hanging_indent():

@@ -182,3 +182,13 @@ table_borders:
   style: three_line
   outer_width_pt: 1.5
   header_width_pt: 0.75
+
+# A4 with the asymmetric margins most Chinese theses use to leave room for
+# binding. Remove this block, or set fields you do not want changed, to keep
+# the document's own page setup.
+page:
+  size: A4
+  top_cm: 2.5
+  bottom_cm: 2.5
+  left_cm: 3.0
+  right_cm: 2.0

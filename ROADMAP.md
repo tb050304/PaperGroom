@@ -248,6 +248,10 @@ docx is deterministic.
   and `none` are the other choices, with `keep` the default so a ruleset that
   says nothing changes nothing. Verified end to end, including XML element
   order and a save/reopen round trip.
+- **Page setup.** `page.size` and `page.*_cm` margins, applied to every
+  section. Fields left out are untouched, and `page` is inherited through
+  `extends` like the styles. The built-in ruleset uses A4 with the asymmetric
+  margins Chinese theses use for binding (3cm left, 2cm right).
 - **`--word-styles` opt-in** maps headings onto Word's built-in Heading 1/2/3
   (and the document title onto Title), so the navigation pane and an automatic
   table of contents work. Styles are matched by normalized name in English and

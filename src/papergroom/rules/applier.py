@@ -15,7 +15,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Cm, Pt, RGBColor
 from lxml import etree
 
 from ..models import (
@@ -26,6 +26,7 @@ from ..models import (
     Role,
     normalise_style_name,
 )
+from .schema import PAGE_SIZES_CM
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _ALIGN_MAP = {
@@ -90,7 +91,41 @@ def apply_ruleset(
         _apply_full(para_docx, style, force_black=force_black)
 
     if ruleset is not None:
+        if ruleset.page is not None:
+            _apply_page_setup(docx_doc, ruleset.page)
         _apply_table_styles(ruleset, docx_doc)
+
+
+def _apply_page_setup(docx_doc: DocxDocument, page) -> None:
+    """Apply paper size and margins to every section.
+
+    Applied to all sections: a thesis's page geometry is a property of the
+    document, not of one chapter. Fields left None are untouched, so a ruleset
+    that only specifies margins keeps whatever paper size the file had.
+    """
+    width, height = (None, None)
+    if page.size is not None:
+        width, height = PAGE_SIZES_CM[page.size]
+    if page.width_cm is not None:
+        width = page.width_cm
+    if page.height_cm is not None:
+        height = page.height_cm
+
+    for section in docx_doc.sections:
+        if width is not None:
+            section.page_width = Cm(width)
+        if height is not None:
+            section.page_height = Cm(height)
+
+        for attribute, value in (
+            ("top_margin", page.top_cm),
+            ("bottom_margin", page.bottom_cm),
+            ("left_margin", page.left_cm),
+            ("right_margin", page.right_cm),
+            ("gutter", page.gutter_cm),
+        ):
+            if value is not None:
+                setattr(section, attribute, Cm(value))
 
 
 def _apply_word_style(para, role: Role, docx_doc: DocxDocument) -> bool:
