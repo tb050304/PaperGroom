@@ -18,8 +18,8 @@ built-in ones.
 - **Phase 3 — rules engine** — mostly landed: `extends` layering, schema
   validation, `validate-rules`, `--word-styles`, and a true hanging indent for
   references. Paragraphs inside real tables remain untouched.
-- **Phase 4 — review loop** — the HTML report lands; feeding a human
-  correction back into a re-run does not.
+- **Phase 4 — review loop** — the HTML report and the export / correct /
+  re-import loop both land. A before/after diff does not.
 - **Phase 5** — not started.
 
 ## Why the prototype isn't good enough
@@ -261,14 +261,17 @@ second time.
   colour-coded by role family. Anything unknown or below the confidence
   threshold is highlighted. No external assets — it opens anywhere and can be
   attached to a bug report.
-- On the sample thesis it shows all 17 non-empty paragraphs labelled with
-  nothing flagged for review.
+- **Correction loop.** `--export-labels` writes an editable file (`index`,
+  `role`, `text`); `--labels` reads it back. Overridden paragraphs skip the
+  model entirely, so a fix is authoritative, repeatable, and free. The file is
+  validated against the document on import: a text mismatch is a hard error,
+  because applying a stale file would label the wrong paragraphs.
+- On the sample thesis: all 17 non-empty paragraphs labelled with nothing
+  flagged; export, change one role, re-run — the corrected paragraph is styled
+  by its new role and nothing else moves.
 
 **Remaining**
 
-- **Correction loop.** The report shows what happened but cannot feed a fix
-  back. Next: emit the labels in an editable file, accept it as input, and
-  re-run only the affected paragraphs.
 - **Before/after diff.** The report shows what was applied, not what the
   paragraph looked like before. A meaningful diff needs run-level original
   formatting captured at parse time.

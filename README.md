@@ -126,12 +126,23 @@ papergroom process input.docx -o output.docx --word-styles
 # confidence and applied style, with uncertain ones highlighted
 papergroom process input.docx -o output.docx --report
 
+# Export the roles, correct any that are wrong, then re-run with the fix
+papergroom process input.docx -o output.docx --export-labels labels.json
+papergroom process input.docx -o output.docx --labels labels.json
+
 # Also dump the role and style decided for each paragraph
 papergroom process input.docx -o output.docx --debug-annotation
 
 # Check a ruleset without processing anything
 papergroom validate-rules my_school.yaml
 ```
+
+`--export-labels` writes a small JSON file with one entry per paragraph
+(`index`, `role`, `text`). Edit a `role`, pass the file back with `--labels`,
+and those paragraphs use the corrected role instead of asking the model — so
+a fix is authoritative, repeatable, and free. The file is checked against the
+document on import: if the text no longer matches, it is rejected rather than
+labelling the wrong paragraphs.
 
 `--word-styles` is off by default because direct formatting is more
 predictable. When it is on, headings get Word's built-in Heading 1/2/3 styles

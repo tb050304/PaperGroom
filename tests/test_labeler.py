@@ -195,6 +195,26 @@ def test_a_dropped_line_falls_back_to_its_hint(monkeypatch):
     assert doc.paragraphs[0].confidence == 0.5
 
 
+def test_a_human_override_wins_and_skips_the_model(monkeypatch):
+    doc = _doc("某个段落的内容，描述实验。")
+    mock = _MockClient()
+    _install(monkeypatch, mock)
+
+    label_document(doc, _llm_config(), None, _processing(), overrides={0: Role.QUOTE})
+
+    assert doc.paragraphs[0].role == Role.QUOTE
+    assert mock.calls == []
+
+
+def test_an_override_beats_a_pattern_decision(monkeypatch):
+    doc = _doc("参考文献：")
+    _install(monkeypatch, _MockClient())
+
+    label_document(doc, _llm_config(), None, _processing(), overrides={0: Role.BODY})
+
+    assert doc.paragraphs[0].role == Role.BODY
+
+
 def test_empty_document_makes_no_call(monkeypatch):
     doc = Document(source_path="x.docx", paragraphs=[])
     monkeypatch.setattr(

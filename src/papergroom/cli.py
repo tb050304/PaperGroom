@@ -19,6 +19,7 @@ from rich.console import Console
 
 from .ai import label_document
 from .config import get_llm_config, get_processing_config
+from .labels import LabelsError, export_labels, load_labels
 from .parser import parse_document
 from .report import write_report
 from .rules.loader import load_ruleset
@@ -65,6 +66,19 @@ def process(
             "Off by default: direct formatting is more predictable."
         ),
     ),
+    labels: Path = typer.Option(
+        None,
+        "--labels",
+        help=(
+            "JSON file of role overrides. Export one with --export-labels, edit "
+            "the roles, pass it back. Overridden paragraphs skip the model."
+        ),
+    ),
+    export_labels_path: Path = typer.Option(
+        None,
+        "--export-labels",
+        help="Write an editable labels file for the processed document.",
+    ),
     report: bool = typer.Option(
         False,
         "--report",
@@ -109,12 +123,29 @@ def process(
         raise typer.Exit(code=1) from e
     console.print(f"[bold]Ruleset:[/bold] {ruleset.name}")
 
+    # 3b. Human corrections, if any. Loaded after structure recovery because
+    #     the indices refer to the recovered paragraphs.
+    overrides = None
+    if labels is not None:
+        try:
+            overrides = load_labels(labels, doc)
+        except LabelsError as e:
+            console.print(f"[red]Cannot use labels:[/red] {e}")
+            raise typer.Exit(code=1) from e
+        console.print(
+            f"[bold]Labels:[/bold] {len(overrides)} override(s) from {labels}"
+        )
+
     # 4. Label roles. The model decides what each paragraph is, and nothing
     #    about how it looks.
     console.print("[bold]Labeling[/bold] roles with AI ...")
     llm_config = get_llm_config()
     processing = get_processing_config(debug_annotation=debug_annotation)
-    label_document(doc, llm_config, ruleset, processing)
+    label_document(doc, llm_config, ruleset, processing, overrides=overrides)
+
+    if export_labels_path is not None:
+        written = export_labels(doc, export_labels_path)
+        console.print(f"  labels exported to {written}")
 
     labeled = sum(1 for p in doc.paragraphs if p.role.value != "unknown")
     console.print(f"  {labeled}/{len(doc.paragraphs)} paragraphs labeled.")

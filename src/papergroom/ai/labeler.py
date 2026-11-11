@@ -84,11 +84,17 @@ def label_document(
     llm_config: LLMConfig,
     ruleset: Ruleset | None,
     processing: ProcessingConfig | None = None,
+    *,
+    overrides: dict[int, Role] | None = None,
 ) -> Annotation:
     """Label every non-empty paragraph of ``doc`` in place; return the result.
 
     Mutates ``doc.paragraphs[i].role`` and ``.confidence``. Styles are *not*
     touched here — see :func:`papergroom.rules.resolve.resolve_styles`.
+
+    ``overrides`` maps paragraph index to role and wins over everything else.
+    Those paragraphs are not sent to the model, so a correction made in an
+    exported labels file is both authoritative and free.
     """
     if processing is None:
         processing = ProcessingConfig()
@@ -98,6 +104,7 @@ def label_document(
         return annotation
 
     labelable = [p for p in doc.paragraphs if not p.is_empty]
+    overrides = overrides or {}
 
     # Fill in the pattern hint for anything that did not come through
     # structure recovery, so the model sees a hint whenever there is one.
@@ -105,13 +112,18 @@ def label_document(
         if para.role_hint is None:
             para.role_hint = classify(para.text)
 
-    # 1. Patterns decide what they can, without asking anyone.
-    decided: dict[int, Role] = {}
+    # 1. Human corrections first, then patterns. Neither reaches the model.
+    decided: dict[int, Role] = dict(overrides)
     for para in labelable:
+        if para.index in decided:
+            continue
         role = certain_role(para.text)
         if role is not None:
             decided[para.index] = role
-            para.role = role
+
+    for para in labelable:
+        if para.index in decided:
+            para.role = decided[para.index]
             para.confidence = _PATTERN_CONFIDENCE
 
     # 2. Everything else goes to the model. The client is built lazily: a
